@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MHP DataSheet</title>
+<link rel="stylesheet" href="styles.css?v=4">
+<!-- HyperFormula : moteur Sheets-compatible (~400 fonctions, FR) -->
+<script src="https://cdn.jsdelivr.net/npm/hyperformula/dist/hyperformula.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hyperformula/dist/languages/frFR.min.js"></script>
+</head>
+<body>
+
+<!-- ───── Header ───── -->
+<div class="header" id="appHeader">
+  <div class="logo">
+    <div class="logo-icon">⬡</div>
+    <span class="logo-text">MHP DataSheet</span>
+  </div>
+  <div class="status-pill">
+    <div class="status-dot" id="statusDot"></div>
+    <span id="statusText">Connexion...</span>
+  </div>
+  <div class="table-selector">
+    <span class="ts-label">Table</span>
+    <select id="tableSelect">
+      <option value="">— chargement —</option>
+    </select>
+  </div>
+  <div class="header-actions">
+    <button class="btn btn-ghost icon-only-mobile" id="btnSearch" title="Rechercher (Ctrl+F)"><span class="btn-icon">🔍</span><span class="btn-text">Recherche</span></button>
+    <div class="btn-dropdown" id="viewsWrap">
+      <button class="btn btn-ghost icon-only-mobile" id="btnViews" title="Vues sauvegardées"><span class="btn-icon">📌</span><span class="btn-text">Vues</span><span style="font-size:10px;opacity:0.6;">▾</span></button>
+      <div class="dropdown-panel hidden" id="viewsPanel"></div>
+    </div>
+    <button class="btn btn-ghost icon-only-mobile" id="btnExport" title="Exporter en CSV (vue courante)"><span class="btn-icon">⬇</span><span class="btn-text">Export</span></button>
+    <button class="btn btn-ghost icon-only-mobile" id="btnLib" title="Bibliothèque de formules"><span class="btn-icon">📚</span><span class="btn-text">Formules</span></button>
+    <button class="btn btn-ghost icon-only-mobile" id="btnHelp" title="Aide formules">?</button>
+    <button class="btn btn-ghost" id="btnAddCol"><span class="btn-icon">+</span><span class="btn-text">Colonne</span></button>
+    <button class="btn btn-ghost" id="btnAddRow"><span class="btn-icon">+</span><span class="btn-text">Ligne</span></button>
+    <button class="btn btn-success hidden" id="saveBtn"><span class="btn-icon">💾</span><span class="btn-text">Sauvegarder</span></button>
+    <button class="btn btn-primary icon-only-mobile" id="btnRefresh" title="Rafraîchir">↻</button>
+  </div>
+</div>
+
+<!-- ───── Toolbar ───── -->
+<div class="toolbar" id="appToolbar">
+  <span class="selection-info" id="selectionInfo">Astuce : clique sur une en-tête de colonne pour trier / filtrer</span>
+  <div class="active-filters" id="activeFilters"></div>
+  <div class="pager">
+    <button id="prevPage" title="Page précédente">‹</button>
+    <span class="pager-label">Offset</span>
+    <input type="number" id="pageOffset" value="0" min="0" step="500">
+    <span class="pager-label">Limit</span>
+    <input type="number" id="pageLimit" value="500" min="1" max="5000">
+    <button id="nextPage" title="Page suivante">›</button>
+  </div>
+</div>
+
+<!-- ───── Column menu (sort + filter + actions, positionné dynamiquement) ───── -->
+<div id="colMenu" class="col-menu hidden"></div>
+
+<!-- ───── Formula bar ───── -->
+<div class="formula-bar" id="appFormulaBar">
+  <div class="cell-ref" id="cellRef">—</div>
+  <div class="fx-label" id="fxLabel" title="Formule type Sheets : commencer par =">fx</div>
+  <input class="formula-input" id="formulaInput" placeholder="Valeur, ou formule type Sheets : =SOMME(palettes_entree)  =SI(A1>10;&quot;OK&quot;;&quot;KO&quot;)  =RECHERCHEV(...)">
+</div>
+
+<!-- ───── Search bar (flottante, Ctrl+F) ───── -->
+<div class="search-bar hidden" id="searchBar">
+  <span class="search-icon">🔍</span>
+  <input id="searchInput" placeholder="Rechercher dans la table…" autocomplete="off">
+  <span class="search-counter" id="searchCounter">—</span>
+  <button id="searchPrev" title="Précédent (Maj+Entrée)">↑</button>
+  <button id="searchNext" title="Suivant (Entrée)">↓</button>
+  <button id="searchClose" title="Fermer (Esc)">✕</button>
+</div>
+
+<!-- ───── Sheet ───── -->
+<div class="sheet-container" id="appSheet">
+  <div class="sheet-scroll" id="sheetScroll">
+    <div class="loading" id="loadingMsg">
+      <div class="spinner"></div>
+      Connexion à PostgreSQL...
+    </div>
+    <table id="dataTable" class="hidden">
+      <thead id="tableHead"></thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+  </div>
+
+  <aside class="sidebar" id="appSidebar">
+    <button class="sidebar-toggle" id="btnToggleSidebar" title="Réduire / étendre la sidebar">›</button>
+    <div class="sidebar-content">
+      <div class="sidebar-header">Propriétés cellule</div>
+      <div class="sidebar-section">
+        <div class="sidebar-label">Référence</div>
+        <div class="sidebar-value" id="sidebarCell">—</div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-label">Valeur affichée</div>
+        <div class="sidebar-value" id="sidebarValue">—</div>
+      </div>
+      <div class="sidebar-section" id="cellFormulaSection" style="display:none;">
+        <div class="sidebar-label">Formule cellule (Sheets)</div>
+        <div class="formula-tag" id="sidebarCellFormula">—</div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-label">Formule SQL colonne</div>
+        <div id="sidebarFormula">—</div>
+        <button class="tool-btn" style="margin-top:6px;width:100%;justify-content:center;" id="btnEditFormula">Modifier formule</button>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-label">Statistiques colonne (page)</div>
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-label">Lignes</div><div class="stat-value" id="statRows">—</div></div>
+          <div class="stat-card"><div class="stat-label">Non vides</div><div class="stat-value" id="statFilled">—</div></div>
+          <div class="stat-card"><div class="stat-label">Somme</div><div class="stat-value" id="statSum">—</div></div>
+          <div class="stat-card"><div class="stat-label">Moyenne</div><div class="stat-value" id="statAvg">—</div></div>
+        </div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-label">Requête active</div>
+        <div class="sql-box" id="sqlQuery">—</div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-label">Modifications en attente</div>
+        <div class="sidebar-value" id="pendingCount" style="color:var(--orange);">0</div>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<!-- ───── Bottom bar ───── -->
+<div class="bottom-bar" id="appBottom">
+  <span class="bottom-info" id="rowCount">—</span>
+  <span class="bottom-info dim">|</span>
+  <span class="bottom-info" id="tableNameInfo">—</span>
+  <span class="bottom-info" id="modifiedInfo" style="display:none;color:#fde68a;">⚡ Modifications non sauvegardées</span>
+  <span class="bottom-info push-right" id="connInfo">PostgreSQL</span>
+</div>
+
+<!-- ───── Modals ───── -->
+<div class="modal-overlay hidden" id="addColModal">
+  <div class="modal">
+    <h3>➕ Nouvelle colonne PostgreSQL</h3>
+    <div class="form-group">
+      <label class="form-label">Nom de la colonne</label>
+      <input class="form-input" id="newColName" placeholder="ex: total_palettes">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Type PostgreSQL</label>
+      <select class="form-select" id="newColType">
+        <option value="TEXT">TEXT</option>
+        <option value="NUMERIC">NUMERIC</option>
+        <option value="INTEGER">INTEGER</option>
+        <option value="DATE">DATE</option>
+        <option value="BOOLEAN">BOOLEAN</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Formule SQL (optionnelle, remplace le RECHERCHEV)</label>
+      <input class="form-input" id="newColFormula" placeholder="ex: pfn(palettes_entree) * 2">
+      <div class="form-hint">
+        <strong>Formule SQL = appliquée par PostgreSQL sur TOUTES les lignes</strong> (parfait pour RECHERCHEV / row-by-row).<br>
+        Pour une formule type Sheets dans <em>une seule</em> cellule, double-cliquez la cellule et tapez <code>=SOMME(...)</code>.
+      </div>
+      <div class="formula-examples">
+        <div class="formula-example-label">Exemples SQL :</div>
+        <div class="formula-example" data-formula="pfn(palettes_entree) + pfn(pal_livree_sortie)">pfn(palettes_entree) + pfn(pal_livree_sortie)</div>
+        <div class="formula-example" data-formula="ROUND((pfn(litres) / NULLIF(pfn(km), 0) * 100)::numeric, 2)">Conso L/100km recalculée</div>
+        <div class="formula-example" data-formula="(SELECT SUM(pfn(s.duree_nbr)) FROM suivi_equipe s WHERE s.n_bl_n_palette = recap_bl.n__bl)">RECHERCHEV duree depuis suivi_equipe</div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" data-close="addColModal">Annuler</button>
+      <button class="btn btn-primary" id="btnCreateColumn">Créer dans PostgreSQL</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="addRowModal">
+  <div class="modal">
+    <h3>➕ Nouvelle ligne</h3>
+    <div id="newRowFields"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" data-close="addRowModal">Annuler</button>
+      <button class="btn btn-primary" id="btnInsertRow">Insérer dans PostgreSQL</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="formulaModal">
+  <div class="modal">
+    <h3>⚡ Formule SQL — <span id="formulaColName"></span></h3>
+    <div class="form-group">
+      <label class="form-label">Formule SQL PostgreSQL</label>
+      <input class="form-input" id="formulaColInput" placeholder="ex: pfn(palettes_entree) + pfn(pal_livree_sortie)">
+      <div class="form-hint">
+        Cette formule remplace le RECHERCHEV — calculée directement dans PostgreSQL sans dépendre du chargement du Sheets.<br><br>
+        Fonctions : <code>pfn()</code> (nombre fr → float), <code>pfd()</code> (date fr → date), toutes les fonctions PostgreSQL.<br>
+        <strong>Mots-clés interdits :</strong> INSERT, UPDATE, DELETE, DROP, etc.
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-danger" id="btnDeleteFormula" style="margin-right:auto;">🗑 Supprimer</button>
+      <button class="btn btn-ghost" data-close="formulaModal">Annuler</button>
+      <button class="btn btn-primary" id="btnSaveFormula">Appliquer sur toutes les lignes</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="helpModal">
+  <div class="modal" style="width:560px;">
+    <h3>💡 Les deux types de formules</h3>
+
+    <div class="help-block">
+      <div class="help-title">📐 Formule cellule (type Google Sheets)</div>
+      <div class="help-body">
+        Double-cliquez une cellule, tapez la formule en commençant par <code>=</code>, puis Entrée.<br>
+        ~400 fonctions disponibles, <strong>en français</strong> ou en anglais.<br>
+        Le résultat est calculé instantanément côté navigateur.
+        <div class="help-examples">
+          <div><code>=SOMME(palettes_entree)</code> — somme de la colonne</div>
+          <div><code>=MOYENNE(B1:B10)</code> — moyenne des 10 premières lignes de B</div>
+          <div><code>=SI(A1&gt;100;"GROS";"petit")</code> — condition</div>
+          <div><code>=NB.SI(client;"BBA Emballages")</code> — comptage conditionnel</div>
+          <div><code>=RECHERCHEV("MAT";code:productivite;7;FAUX)</code> — RECHERCHEV native</div>
+          <div><code>=A1*1,2</code> — arithmétique</div>
+        </div>
+        <div class="help-note">⚠️ Voit uniquement les lignes <strong>de la page courante</strong>.</div>
+      </div>
+    </div>
+
+    <div class="help-block">
+      <div class="help-title">⚡ Formule SQL (colonne entière)</div>
+      <div class="help-body">
+        Bouton <strong>+ Colonne</strong> ou <strong>Modifier formule</strong>.<br>
+        Appliquée par PostgreSQL sur <strong>toutes les lignes</strong> (même 370 000), résultat persisté en BD.<br>
+        Idéal pour les RECHERCHEV massifs sur de grosses tables.
+        <div class="help-examples">
+          <div><code>pfn(palettes_entree) + pfn(pal_livree_sortie)</code></div>
+          <div><code>(SELECT SUM(pfn(s.duree_nbr)) FROM suivi_equipe s WHERE s.n_bl_n_palette = recap_bl.n__bl)</code></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="help-block">
+      <div class="help-title">🎯 Lequel choisir ?</div>
+      <div class="help-body">
+        <table class="help-table">
+          <tr><th></th><th>Formule cellule</th><th>Formule SQL colonne</th></tr>
+          <tr><td>Une seule cellule (total, KPI)</td><td>✅</td><td>—</td></tr>
+          <tr><td>Toutes les lignes d'une colonne</td><td>—</td><td>✅</td></tr>
+          <tr><td>RECHERCHEV sur 37 000 lignes</td><td>—</td><td>✅</td></tr>
+          <tr><td>Calcul ad-hoc rapide</td><td>✅</td><td>—</td></tr>
+          <tr><td>Persistant en BD</td><td>Oui (texte stocké)</td><td>Oui (résultat stocké)</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-primary" data-close="helpModal">OK, compris</button>
+    </div>
+  </div>
+</div>
+
+<!-- ───── Modal bibliothèque formules ───── -->
+<div class="modal-overlay hidden" id="libModal">
+  <div class="modal lib-modal">
+    <div class="lib-header">
+      <h3 style="margin:0;">📚 Bibliothèque des formules</h3>
+      <button class="btn btn-ghost" data-close="libModal">✕</button>
+    </div>
+    <div class="lib-search-row">
+      <input class="form-input" id="libSearch" placeholder="🔍 Rechercher (SOMME, IF, recherchev, sum...)" autocomplete="off">
+    </div>
+    <div class="lib-cats" id="libCats"></div>
+    <div class="lib-body">
+      <div class="lib-list" id="libList"></div>
+      <div class="lib-detail" id="libDetail">
+        <div class="lib-detail-empty">← Sélectionne une formule</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ───── Autocomplete dropdown (positionné dynamiquement) ───── -->
+<div id="acDropdown" class="ac-dropdown hidden"></div>
+
+<script src="formulas.js?v=4"></script>
+<script src="app.js?v=4"></script>
+</body>
+</html>
