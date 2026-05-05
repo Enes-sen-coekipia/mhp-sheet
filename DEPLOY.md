@@ -1,116 +1,202 @@
 # Déploiement prod — serveur Windows MHP
 
-Architecture : 2 conteneurs Docker (`backend` FastAPI + `frontend` Nginx). Le PostgreSQL **n'est pas containérisé** : on attaque directement le PG 18 du serveur Windows.
+Stack identique à `MHP_app` : **Python venv + uvicorn (NSSM) + Nginx natif + PostgreSQL natif**. Pas de Docker.
 
-## Pré-requis (une seule fois sur le serveur)
+```
+Utilisateur LAN
+    │ HTTP :8081
+    ▼
+Nginx (existant, C:\nginx\)  →  C:\MHP\mhp-datasheet\frontend  (HTML/CSS/JS statiques)
+    │ proxy /api/*
+    ▼
+uvicorn (service NSSM)  127.0.0.1:8001  →  PostgreSQL 18 local
+```
 
-1. **Docker Desktop pour Windows** installé et démarré.
-2. **PostgreSQL 18** installé sur le serveur (déjà fait par le client) avec la base `pilotage_mhp` et l'utilisateur `mhp_user`.
-3. Vérifier que `pg_hba.conf` accepte les connexions depuis Docker :
-   ```
-   host    pilotage_mhp    mhp_user    172.16.0.0/12    scram-sha-256
-   host    pilotage_mhp    mhp_user    127.0.0.1/32     scram-sha-256
-   ```
-   Et que `postgresql.conf` a `listen_addresses = '*'` (ou au moins `localhost`).
-4. **Git** installé (pour cloner / pull).
+## Pré-requis sur le serveur (une seule fois)
 
-## Premier déploiement
+| Outil | Vérification | Si absent |
+|---|---|---|
+| **Python 3.12+** | `python --version` | Installer depuis [python.org](https://www.python.org/downloads/windows/) en cochant "Add to PATH" |
+| **NSSM** | `Test-Path C:\nssm\nssm.exe` | Déjà présent (utilisé par MHP_app) |
+| **Nginx** | `Test-Path C:\nginx\nginx.exe` | Déjà présent (utilisé par MHP_app) |
+| **PostgreSQL 18** | `Get-Service postgresql*` | Déjà installé par le client |
+| **Git** | `git --version` | [git-scm.com](https://git-scm.com/download/win) |
+
+## 1. Cloner le repo
 
 ```powershell
-# 1. Cloner dans C:\MHP (à côté de l'autre app)
 cd C:\MHP
-git clone <URL_DU_REPO> mhp-datasheet
-cd mhp-datasheet
-
-# 2. Créer le .env prod
-copy .env.prod.example .env
-notepad .env
-# → mettre le vrai DB_PASSWORD
-# → DB_HOST = host.docker.internal (PG sur le même serveur)
-
-# 3. Build + démarrer
-docker compose -f docker-compose.prod.yml up -d --build
-
-# 4. Vérifier
-docker compose -f docker-compose.prod.yml ps
-docker compose -f docker-compose.prod.yml logs --tail=30 backend
-```
-
-L'app est accessible sur **http://192.168.1.7:8081** (port 8081 pour ne pas entrer en conflit avec le 8080 de l'app `MHP_app` existante).
-
-## Mises à jour ultérieures
-
-```powershell
+git clone https://github.com/Enes-sen-coekipia/mhp-sheet.git mhp-datasheet
 cd C:\MHP\mhp-datasheet
-git pull
-docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-## Service Windows (auto-démarrage)
-
-Docker Desktop démarre automatiquement les conteneurs marqués `restart: unless-stopped` au boot du serveur. Aucune config NSSM nécessaire pour cette app.
-
-Si Docker Desktop n'est pas en démarrage auto :
-- Paramètres Docker Desktop → "Start Docker Desktop when you sign in"
-
-## Indexation PG (à faire une fois sur la BD prod)
-
-Pour accélérer les RECHERCHEV-via-SQL :
+## 2. Créer le `.env`
 
 ```powershell
-# Depuis le serveur PG :
-psql -U mhp_user -d pilotage_mhp -f init.sql
-# Les CREATE TABLE/INSERT échoueront (tables existent déjà) — OK, on veut juste les CREATE INDEX IF NOT EXISTS
+Copy-Item .env.prod.example .env
+notepad .env
 ```
 
-Ou plus propre, n'extraire que les indexes :
+Contenu à mettre :
+
+```
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_NAME=pilotage_mhp
+DB_USER=mhp_user
+DB_PASSWORD=METTRE_LE_VRAI_MOT_DE_PASSE
+
+LOG_LEVEL=INFO
+POOL_MIN_SIZE=1
+POOL_MAX_SIZE=10
+DEFAULT_PAGE_SIZE=500
+MAX_PAGE_SIZE=5000
+
+API_USERNAME=
+API_PASSWORD=
+```
+
+## 3. Préparer la BD (UNE SEULE FOIS, dans pgAdmin/psql)
 
 ```sql
--- À copier-coller dans psql ou pgAdmin
+CREATE OR REPLACE FUNCTION pfn(val TEXT) RETURNS FLOAT AS $$
+BEGIN
+  IF val IS NULL OR trim(val) = '' THEN RETURN NULL; END IF;
+  RETURN replace(regexp_replace(trim(val), '[^\d,\-]', '', 'g'), ',', '.')::float;
+EXCEPTION WHEN OTHERS THEN RETURN NULL;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION pfd(val TEXT) RETURNS DATE AS $$
+BEGIN
+  IF val IS NULL OR trim(val) = '' THEN RETURN NULL; END IF;
+  IF val ~ '^\d{1,2}/\d{1,2}/\d{4}$' THEN RETURN TO_DATE(val, 'DD/MM/YYYY'); END IF;
+  IF val ~ '^\d{1,2}/\d{1,2}/\d{2}$' THEN RETURN TO_DATE(val, 'DD/MM/YY'); END IF;
+  IF val ~ '^\d{4}-\d{2}-\d{2}' THEN RETURN val::date; END IF;
+  RETURN NULL;
+EXCEPTION WHEN OTHERS THEN RETURN NULL;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
+CREATE TABLE IF NOT EXISTS _mhp_formulas (
+    table_name  TEXT,
+    column_name TEXT,
+    formula     TEXT,
+    PRIMARY KEY (table_name, column_name)
+);
+
+-- Index pour accélérer les RECHERCHEV-via-SQL
 CREATE INDEX IF NOT EXISTS idx_suivi_equipe_n_bl_n_palette ON suivi_equipe(n_bl_n_palette);
-CREATE INDEX IF NOT EXISTS idx_recap_bl_n__bl              ON recap_bl(n__bl);
-CREATE INDEX IF NOT EXISTS idx_recap_bl_client             ON recap_bl(client);
 CREATE INDEX IF NOT EXISTS idx_suivi_equipe_client         ON suivi_equipe(client);
 CREATE INDEX IF NOT EXISTS idx_suivi_equipe_date           ON suivi_equipe(date);
 CREATE INDEX IF NOT EXISTS idx_suivi_equipe_code           ON suivi_equipe(code);
+CREATE INDEX IF NOT EXISTS idx_recap_bl_n__bl              ON recap_bl(n__bl);
+CREATE INDEX IF NOT EXISTS idx_recap_bl_client             ON recap_bl(client);
 CREATE INDEX IF NOT EXISTS idx_recap_bl_date               ON recap_bl(date);
 ```
 
-## Restriction d'accès LAN
+100% non-destructif (`CREATE OR REPLACE` / `IF NOT EXISTS`). Aucun risque pour les données existantes.
 
-L'auth est désactivée. Pour limiter l'accès au LAN client, ajouter dans `nginx/nginx.conf` :
+## 4. Installer le service backend
 
+PowerShell **en admin** :
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass -Force
+cd C:\MHP\mhp-datasheet
+.\deploy\install.ps1
 ```
-location / {
-    allow 192.168.1.0/24;
-    deny all;
-    ...
-}
+
+Le script :
+1. Crée un venv Python dans `backend\.venv`
+2. Installe les dépendances (`fastapi`, `psycopg2-binary`, etc.)
+3. Crée le service Windows `MHP-Datasheet-Backend` via NSSM
+4. Le démarre et fait un check `/health`
+
+À la fin tu dois voir `Service status : SERVICE_RUNNING` et `Health : {"status":"ok","db":"connected"}`.
+
+Si erreur, voir `C:\MHP\mhp-datasheet\logs\backend.err.log`.
+
+## 5. Configurer Nginx
+
+### Si ton `nginx.conf` inclut un dossier `sites/`
+
+```powershell
+Copy-Item C:\MHP\mhp-datasheet\deploy\mhp-datasheet.nginx.conf C:\nginx\conf\sites\mhp-datasheet.conf
+C:\nginx\nginx.exe -s reload
 ```
-puis `docker compose -f docker-compose.prod.yml restart frontend`.
+
+### Sinon (tout est dans `nginx.conf`)
+
+Ouvrir `C:\nginx\conf\nginx.conf`, copier-coller le contenu de `deploy\mhp-datasheet.nginx.conf` à l'intérieur du bloc `http { ... }`, sauver, puis :
+
+```powershell
+C:\nginx\nginx.exe -s reload
+```
+
+## 6. Tester
+
+Ouvrir un navigateur :
+
+- Sur le serveur : http://localhost:8081
+- Depuis le LAN : http://192.168.1.7:8081 *(remplacer par l'IP réelle)*
+
+## Mises à jour ultérieures
+
+Depuis ton PC :
+
+```powershell
+git add . ; git commit -m "..." ; git push
+```
+
+Sur le serveur :
+
+```powershell
+cd C:\MHP\mhp-datasheet
+.\deploy\update.ps1
+# Si le frontend a aussi changé : .\deploy\update.ps1 -ReloadNginx
+```
 
 ## Commandes utiles
 
 ```powershell
-# Logs en direct
-docker compose -f docker-compose.prod.yml logs -f backend
+# Status du service
+C:\nssm\nssm.exe status MHP-Datasheet-Backend
 
-# Redémarrer juste le backend (après pull)
-docker compose -f docker-compose.prod.yml restart backend
+# Restart manuel
+C:\nssm\nssm.exe restart MHP-Datasheet-Backend
 
-# Tout arrêter
-docker compose -f docker-compose.prod.yml down
+# Stop / start
+C:\nssm\nssm.exe stop  MHP-Datasheet-Backend
+C:\nssm\nssm.exe start MHP-Datasheet-Backend
 
-# Statut
-docker compose -f docker-compose.prod.yml ps
+# Logs (suivre en direct)
+Get-Content C:\MHP\mhp-datasheet\logs\backend.out.log -Tail 50 -Wait
+Get-Content C:\MHP\mhp-datasheet\logs\backend.err.log -Tail 50 -Wait
+
+# Test backend en direct (court-circuite Nginx)
+Invoke-RestMethod http://127.0.0.1:8001/health
+Invoke-RestMethod http://127.0.0.1:8001/tables
+
+# Suppression complète du service (en cas de besoin)
+C:\nssm\nssm.exe stop   MHP-Datasheet-Backend confirm
+C:\nssm\nssm.exe remove MHP-Datasheet-Backend confirm
 ```
 
 ## Ports utilisés
 
-| Port  | Service                           |
-|-------|-----------------------------------|
-| 8081  | Nginx frontend (mhp-datasheet)    |
-| 8000  | Backend FastAPI (interne uniquement, pas exposé hors Docker) |
-| 5432  | PostgreSQL host (existant)        |
+| Port | Service | Visibilité |
+|------|---------|------------|
+| 8081 | Nginx (frontend MHP DataSheet) | LAN |
+| 8001 | uvicorn backend | Interne (127.0.0.1 uniquement) |
+| 5432 | PostgreSQL | Local |
 
-Les ports `8080` (MHP_app) et `3306` (MySQL) ne sont **pas touchés**.
+Pas de conflit avec `MHP_app` (8080), `MySQL` (3306) ou `Backend MHP_app` (8000).
+
+## Restriction LAN (recommandé)
+
+Décommenter le bloc `allow / deny` dans `deploy/mhp-datasheet.nginx.conf` (ou la copie dans `C:\nginx\conf\sites\`), adapter le subnet (`192.168.1.0/24` par défaut), puis :
+
+```powershell
+C:\nginx\nginx.exe -s reload
+```

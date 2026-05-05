@@ -2,20 +2,18 @@
 
 Interface tableur web connectée à PostgreSQL — remplace Google Sheets sans dépendre des formules RECHERCHEV.
 
-## Lancer en local
+## Dev local (Docker)
 
 ```bash
-# 1. Copier le template d'environnement
-cp .env.example .env
-# Éditer .env et changer au minimum POSTGRES_PASSWORD, DB_PASSWORD et API_PASSWORD
-
-# 2. Démarrer
+cp .env.example .env       # éditer les passwords
 docker compose up --build
 ```
 
-→ Interface : http://localhost:3000 (login : voir `API_USERNAME` / `API_PASSWORD` dans `.env`)
-→ API       : http://localhost:8000 (Basic Auth)
-→ Swagger   : http://localhost:8000/docs
+→ Interface : http://localhost:3000
+
+## Prod (serveur Windows MHP, NSSM + Nginx natif)
+
+Voir **[DEPLOY.md](DEPLOY.md)** — install via `deploy\install.ps1`.
 
 ## Architecture
 
