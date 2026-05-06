@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MHP DataSheet</title>
-<link rel="stylesheet" href="styles.css?v=9">
+<link rel="stylesheet" href="styles.css?v=10">
 <!-- HyperFormula : moteur Sheets-compatible (~400 fonctions, FR) -->
 <script src="https://cdn.jsdelivr.net/npm/hyperformula/dist/hyperformula.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hyperformula/dist/languages/frFR.min.js"></script>
@@ -352,11 +352,13 @@
               <option value="cron">⏱ Planifié (cron)</option>
               <option value="on_edit">✏️ À chaque édition de cellule</option>
               <option value="on_row_add">➕ À chaque ajout de ligne</option>
+              <option value="on_webhook">📡 Sur webhook reçu</option>
             </select>
             <input class="form-input" id="scrCron" placeholder="0 8 * * * (cron Europe/Paris)" style="flex:1;max-width:240px;display:none;">
             <select class="form-select" id="scrTriggerTable" style="width:auto;display:none;">
               <option value="">— toutes les tables —</option>
             </select>
+            <input class="form-input" id="scrTriggerWebhook" placeholder="slug webhook (ex: shiptify)" style="flex:1;max-width:200px;display:none;">
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);">
               <input type="checkbox" id="scrEnabled" checked> Activé
             </label>
@@ -475,6 +477,35 @@ mhp.log(f"{len(rows)} lignes importées")
     </div>
 
     <div class="help-block">
+      <div class="help-title">🌐 Endpoint universel — déclenchable de partout</div>
+      <pre class="lib-example"># Tout script est exposé sur ces 2 URLs (besoin du header X-API-Token) :
+POST /api/scripts/{id}/invoke
+POST /api/scripts/by-name/{name}/invoke
+
+# Le body JSON est dispo dans le script via :
+import mhp, os
+data = mhp.get_invoke_body()   # parse JSON automatiquement
+print(data)
+
+# Exemple appelé depuis Apps Script :
+UrlFetchApp.fetch('http://192.168.1.7:8081/api/scripts/by-name/mon_script/invoke', {
+  method: 'post',
+  headers: { 'X-API-Token': 'xxx' },
+  contentType: 'application/json',
+  payload: JSON.stringify({ message: 'Hello' })
+});
+
+# Chaîner depuis un autre script Python :
+result = mhp.run_script('autre_script', body={'foo': 'bar'})
+mhp.log(f"Status : {result['status']}")</pre>
+      <div class="help-note">
+        💡 Tu peux ajouter <strong>n'importe quel nouveau type de déclenchement</strong>
+        sans modifier l'app : crée un trigger externe (cron Linux, GitHub Actions, n8n, Apps Script,
+        zapier...) qui POST sur l'URL <code>/invoke</code>. Aucune limite.
+      </div>
+    </div>
+
+    <div class="help-block">
       <div class="help-title">⏱ Triggers automatiques</div>
       <pre class="lib-example">▶ Manuel       — déclenché par le bouton ▶
 ⏱ Cron         — déclenché à des horaires (ex: '0 8 * * *' = 8h tous les jours)
@@ -554,7 +585,7 @@ Exemple on_edit :
 <!-- ───── Autocomplete dropdown (positionné dynamiquement) ───── -->
 <div id="acDropdown" class="ac-dropdown hidden"></div>
 
-<script src="formulas.js?v=9"></script>
-<script src="app.js?v=9"></script>
+<script src="formulas.js?v=10"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>

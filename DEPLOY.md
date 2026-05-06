@@ -219,6 +219,50 @@ C:\nssm\nssm.exe remove MHP-Datasheet-Backend confirm
 
 Pas de conflit avec `MHP_app` (8080), `MySQL` (3306) ou `Backend MHP_app` (8000).
 
+## Configuration du token d'ingestion (REQUIS pour Apps Script)
+
+Pour autoriser les scripts Apps Script à pousser des données / déclencher des scripts :
+
+```powershell
+# Génère un token aléatoire
+$token = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 40 | % {[char]$_})
+echo "INGEST_API_TOKEN=$token"
+```
+
+→ Coller la ligne dans `C:\MHP\mhp-datasheet\.env`, puis :
+```powershell
+C:\nssm\nssm.exe restart MHP-Datasheet-Backend
+```
+
+→ Coller le **même token** dans `apps_script_templates/_helper.gs` côté Google (variable `MHP_TOKEN`).
+
+## Templates Apps Script — migration des scripts existants
+
+Le dossier [`apps_script_templates/`](apps_script_templates/) contient 7 fichiers prêts à coller dans Apps Script :
+- `_helper.gs` (à coller en premier — fonctions partagées)
+- `stock_it.gs`, `stock_it_preparateur.gs`, `dashdoc_kpi.gs`, `dashdoc_cp.gs`, `astrata.gs`, `leclerc.gs`, `shiptify_relay.gs`
+
+Procédure complète dans [apps_script_templates/README.md](apps_script_templates/README.md).
+
+## Endpoint universel — créer ses propres déclencheurs
+
+**Tout script Python est appelable depuis l'extérieur** via :
+```
+POST http://192.168.1.7:8081/api/scripts/by-name/{nom_du_script}/invoke
+Header X-API-Token: <même token que INGEST_API_TOKEN>
+Body: n'importe quel JSON
+```
+
+→ Le client peut créer N'IMPORTE QUEL nouveau type de déclenchement sans toucher au code de l'app :
+- Cron Linux : `curl -X POST .../invoke -H "X-API-Token: ..."`
+- GitHub Action / GitLab CI : pareil
+- Apps Script déclenché par un événement Google (Calendar, Sheets edit, etc.)
+- n8n / Zapier / Make / IFTTT
+- Un autre serveur interne MHP
+- Un script Python qui appelle un autre via `mhp.run_script('nom')`
+
+C'est le **seul endpoint à ouvrir au LAN** (les modifs UI restent locales).
+
 ## Configuration OAuth Google (Gmail / Drive / Sheets)
 
 Pour permettre aux scripts d'utiliser `mhp.gmail`, `mhp.drive`, `mhp.sheets`.

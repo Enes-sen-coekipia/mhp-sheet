@@ -1550,8 +1550,9 @@ async function openScriptsModal() {
 }
 
 function updateTriggerInputs(triggerType) {
-  $('scrCron').style.display         = triggerType === 'cron' ? '' : 'none';
-  $('scrTriggerTable').style.display = (triggerType === 'on_edit' || triggerType === 'on_row_add') ? '' : 'none';
+  $('scrCron').style.display           = triggerType === 'cron' ? '' : 'none';
+  $('scrTriggerTable').style.display   = (triggerType === 'on_edit' || triggerType === 'on_row_add') ? '' : 'none';
+  $('scrTriggerWebhook').style.display = triggerType === 'on_webhook' ? '' : 'none';
 }
 
 function closeScriptsModal() {
@@ -1629,6 +1630,7 @@ async function loadScript(id) {
     $('scrTriggerType').value = s.trigger_type;
     $('scrCron').value = s.trigger_cron || '';
     $('scrTriggerTable').value = s.trigger_table || '';
+    $('scrTriggerWebhook').value = s.trigger_webhook_slug || '';
     updateTriggerInputs(s.trigger_type);
     $('scrEnabled').checked = !!s.enabled;
     $('scrSandboxed').checked = !!s.sandboxed;
@@ -1662,6 +1664,7 @@ async function saveScript() {
     trigger_type: $('scrTriggerType').value,
     trigger_cron: $('scrCron').value.trim() || null,
     trigger_table: $('scrTriggerTable').value || null,
+    trigger_webhook_slug: $('scrTriggerWebhook').value.trim() || null,
     enabled: $('scrEnabled').checked,
     sandboxed: $('scrSandboxed').checked,
   };

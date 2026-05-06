@@ -117,11 +117,14 @@ def run_script_code(
         run_id = cur.fetchone()["id"]
 
     env = os.environ.copy()
-    env["MHP_DB_HOST"]     = settings.db_host
-    env["MHP_DB_PORT"]     = str(settings.db_port)
-    env["MHP_DB_NAME"]     = settings.db_name
-    env["MHP_DB_USER"]     = settings.db_user
-    env["MHP_DB_PASSWORD"] = settings.db_password
+    env["MHP_DB_HOST"]      = settings.db_host
+    env["MHP_DB_PORT"]      = str(settings.db_port)
+    env["MHP_DB_NAME"]      = settings.db_name
+    env["MHP_DB_USER"]      = settings.db_user
+    env["MHP_DB_PASSWORD"]  = settings.db_password
+    # Pour mhp.run_script (chaînage via HTTP /invoke)
+    env["MHP_API_INTERNAL"] = "http://127.0.0.1:8000"
+    env["MHP_INGEST_TOKEN"] = settings.ingest_api_token or ""
     backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     env["PYTHONPATH"] = backend_dir + os.pathsep + env.get("PYTHONPATH", "")
     env["PYTHONDONTWRITEBYTECODE"] = "1"

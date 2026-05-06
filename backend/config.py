@@ -37,5 +37,11 @@ class Settings(BaseSettings):
     google_oauth_client_secret: str = ""
     google_oauth_redirect_uri: str = "http://localhost:3000/api/integrations/google/callback"
 
+    # ─── Ingestion (Apps Script → notre app) ───
+    # Token à fournir dans le header X-API-Token (ou ?api_token=) pour autoriser
+    # les écritures via /api/table/{name}/rows ou /api/webhook/{slug}.
+    # Vide = pas de protection (à éviter en prod).
+    ingest_api_token: str = ""
+
 
 settings = Settings()

@@ -443,3 +443,52 @@ gmail = _Gmail()
 drive = _Drive()
 sheets = _Sheets()
 
+
+# ─── Chaînage de scripts (mhp.run_script) ────────────────────
+def run_script(name_or_id, body=None, timeout=120):
+    """Exécute un autre script et attend sa fin. Retourne {status, output, error, duration_ms}.
+
+    Usage :
+        result = mhp.run_script('importStockIt')
+        result = mhp.run_script('mailQuotidien', body={'destinataires':['admin@mhp.fr']})
+
+    L'autre script reçoit le body dans os.environ['MHP_INVOKE_BODY'] (JSON serialisé).
+    Implémenté via un appel HTTP à /api/scripts/.../invoke pour éviter tout couplage
+    avec le pool DB du backend.
+    """
+    api_base = os.environ.get("MHP_API_INTERNAL", "http://127.0.0.1:8000")
+    token = os.environ.get("MHP_INGEST_TOKEN") or os.environ.get("INGEST_API_TOKEN", "")
+
+    if isinstance(name_or_id, int) or (isinstance(name_or_id, str) and name_or_id.isdigit()):
+        url = f"{api_base}/scripts/{name_or_id}/invoke"
+    else:
+        url = f"{api_base}/scripts/by-name/{name_or_id}/invoke"
+
+    body_bytes = _json.dumps(body or {}).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["X-API-Token"] = token
+
+    req = urllib.request.Request(url, data=body_bytes, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return _json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        text = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"run_script HTTP {e.code} : {text[:200]}")
+
+
+# Exposition env vars utiles pour les scripts invoqués via /invoke ou par un autre script
+def get_invoke_body():
+    """Récupère le body JSON passé à un script via /invoke (ou run_script(...,body=...)).
+
+    Renvoie None si pas de body, dict si JSON valide, str sinon.
+    """
+    raw = os.environ.get("MHP_INVOKE_BODY", "")
+    if not raw:
+        return None
+    try:
+        return _json.loads(raw)
+    except Exception:
+        return raw
+

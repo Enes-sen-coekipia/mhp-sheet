@@ -59,6 +59,31 @@ def fire_on_edit(table: str, column: str, primary_val: str, old_value, new_value
     _fire_async(ids, extra_env, "on_edit")
 
 
+def fire_on_webhook(slug: str, webhook_id: int, headers: dict, body_json, body_raw: str):
+    """Appelé après réception d'un webhook (POST /api/webhook/{slug})."""
+    import json as _json
+    with get_cursor(dict_cursor=True) as (cur, _):
+        cur.execute(
+            "SELECT id FROM _mhp_scripts "
+            "WHERE enabled = TRUE AND trigger_type = 'on_webhook' "
+            "  AND (trigger_webhook_slug = %s OR trigger_webhook_slug IS NULL OR trigger_webhook_slug = '')",
+            (slug,),
+        )
+        ids = [r["id"] for r in cur.fetchall()]
+    if not ids:
+        return
+    extra_env = {
+        "MHP_TRIGGER_TYPE": "on_webhook",
+        "MHP_WEBHOOK_SLUG": slug,
+        "MHP_WEBHOOK_ID": str(webhook_id),
+        "MHP_WEBHOOK_HEADERS": _json.dumps(headers, default=str),
+        "MHP_WEBHOOK_BODY_JSON": _json.dumps(body_json, default=str) if body_json is not None else "",
+        "MHP_WEBHOOK_BODY_RAW": (body_raw or "")[:50_000],  # cap pour env vars
+    }
+    log.info("on_webhook %s id=%s → %d script(s)", slug, webhook_id, len(ids))
+    _fire_async(ids, extra_env, "on_webhook")
+
+
 def fire_on_row_add(table: str, primary_val: str, row_data: dict):
     """Appelé après un INSERT (POST /table/{name}/row)."""
     ids = _scripts_for("on_row_add", table)

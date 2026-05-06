@@ -44,6 +44,19 @@ CREATE TABLE IF NOT EXISTS _mhp_scripts (
 -- Migrations idempotentes pour BD existantes
 ALTER TABLE _mhp_scripts ADD COLUMN IF NOT EXISTS trigger_table TEXT;
 ALTER TABLE _mhp_scripts ADD COLUMN IF NOT EXISTS sandboxed BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE _mhp_scripts ADD COLUMN IF NOT EXISTS trigger_webhook_slug TEXT;
+
+-- ─── Webhooks reçus (génériques, pour Shiptify et autres push externes) ───
+CREATE TABLE IF NOT EXISTS _mhp_webhooks (
+    id           SERIAL PRIMARY KEY,
+    slug         TEXT NOT NULL,                     -- identifiant de la source (ex: 'shiptify')
+    received_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+    source_ip    TEXT,
+    headers      JSONB,
+    body_json    JSONB,
+    body_raw     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_webhooks_slug ON _mhp_webhooks(slug, received_at DESC);
 
 CREATE TABLE IF NOT EXISTS _mhp_script_runs (
     id            SERIAL PRIMARY KEY,
