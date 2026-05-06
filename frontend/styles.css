@@ -70,8 +70,11 @@ body {
 .ts-trash { background: transparent; border: none; color: var(--text3); cursor: pointer; font-size: 14px; padding: 0 4px; border-left: 1px solid var(--border); margin-left: 4px; height: 24px; }
 .ts-trash:hover { color: var(--red); }
 
-.header-actions { margin-left: auto; display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+.header-actions { margin-left: auto; display: flex; gap: 6px; align-items: center; flex-shrink: 0; min-width: 0; }
 .user-chip { font-size: 12px; color: var(--text2); padding: 0 10px; border-right: 1px solid var(--border); height: 18px; display: flex; align-items: center; }
+.btn-icon { padding: 0 10px !important; min-width: 32px; justify-content: center; }
+.btn-compact { padding: 0 10px !important; }
+.btn-caret { font-size: 9px; opacity: 0.6; margin-left: 2px; }
 
 /* Buttons */
 .btn { height: 32px; padding: 0 14px; border-radius: var(--radius); border: none; cursor: pointer; font-family: 'DM Sans', sans-serif; font-size: 12.5px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; transition: all 0.15s; white-space: nowrap; }
@@ -105,7 +108,9 @@ body {
 .toolbar-sep { width: 1px; height: 20px; background: var(--border); margin: 0 6px; }
 .tool-btn { height: 28px; padding: 0 10px; border-radius: 4px; border: none; background: transparent; color: var(--text2); cursor: pointer; display: inline-flex; align-items: center; font-size: 12px; font-family: 'DM Sans', sans-serif; transition: all 0.1s; white-space: nowrap; gap: 4px; }
 .tool-btn:hover { background: var(--surface2); color: var(--text); }
-.selection-info { font-size: 11px; color: var(--text3); font-family: 'DM Sans', sans-serif; padding: 0 8px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.selection-info { font-size: 11px; color: var(--text3); font-family: 'DM Sans', sans-serif; padding: 0 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.85; }
+.active-filters:not(:empty) + .pager,
+.active-filters + .pager { margin-left: auto; }
 
 .pager { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .pager-label { font-size: 11px; color: var(--text3); }
@@ -253,27 +258,26 @@ tr.new-row:hover td { background: rgba(34,197,94,0.06); color: var(--green); }
 
 .sidebar-toggle {
   position: absolute;
-  top: 50%;
-  left: -12px;
-  transform: translateY(-50%);
-  width: 24px;
-  height: 48px;
+  top: 14px;
+  left: -10px;
+  width: 20px;
+  height: 36px;
   background: var(--surface2);
   border: 1px solid var(--border);
-  border-radius: 6px 0 0 6px;
+  border-radius: 5px 0 0 5px;
   border-right: none;
-  color: var(--text2);
+  color: var(--text3);
   cursor: pointer;
-  font-size: 16px;
-  z-index: 25;
+  font-size: 12px;
+  z-index: 15;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.15s, color 0.15s;
-  box-shadow: -2px 0 6px rgba(0,0,0,0.2);
+  transition: background 0.15s, color 0.15s, width 0.15s;
+  opacity: 0.7;
 }
-.sidebar-toggle:hover { background: var(--surface3); color: var(--text); }
-.sidebar.collapsed .sidebar-toggle { transform: translateY(-50%) rotate(180deg); }
+.sidebar-toggle:hover { background: var(--accent); color: white; opacity: 1; width: 24px; }
+.sidebar.collapsed .sidebar-toggle { transform: rotate(180deg); }
 
 .sidebar-header { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 11px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; }
 .sidebar-section { padding: 12px 16px; border-bottom: 1px solid var(--border-soft); }
@@ -832,10 +836,31 @@ thead th.filtered .h-icon.filter { color: var(--orange); }
 /* ──────────────────────────────────────────────────────────
    RESPONSIVE — Tablet (≤ 1100px)
    ────────────────────────────────────────────────────────── */
+/* ≤ 1280px : raccourcit l'astuce + Vues icon-only */
+@media (max-width: 1280px) {
+  .selection-info { display: none; }
+  #btnViews .btn-text { display: none; }
+  #btnViews .btn-caret { display: none; }
+}
+
+/* ≤ 1100px : sidebar plus étroite, table selector plus petit */
 @media (max-width: 1100px) {
   :root { --sidebar-w: 250px; }
   .table-selector select { max-width: 140px; }
   .user-chip { display: none; }
+}
+
+/* ≤ 980px : + Colonne / + Ligne en icon-only */
+@media (max-width: 980px) {
+  #btnAddCol .btn-text, #btnAddRow .btn-text { display: none; }
+  #saveBtn .btn-text { display: none; }
+}
+
+/* ≤ 880px : status pill réduit */
+@media (max-width: 880px) {
+  .status-pill { padding: 4px 8px; }
+  .status-pill span { display: none; }
+  .table-selector .ts-label { display: none; }
 }
 
 /* ──────────────────────────────────────────────────────────

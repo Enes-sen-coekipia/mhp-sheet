@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MHP DataSheet</title>
-<link rel="stylesheet" href="styles.css?v=8">
+<link rel="stylesheet" href="styles.css?v=9">
 <!-- HyperFormula : moteur Sheets-compatible (~400 fonctions, FR) -->
 <script src="https://cdn.jsdelivr.net/npm/hyperformula/dist/hyperformula.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hyperformula/dist/languages/frFR.min.js"></script>
@@ -32,28 +32,42 @@
     <button class="ts-trash" id="btnDropTable" title="Supprimer cette table">🗑</button>
   </div>
   <div class="header-actions">
-    <button class="btn btn-ghost icon-only-mobile" id="btnSearch" title="Rechercher (Ctrl+F)"><span class="btn-icon">🔍</span><span class="btn-text">Recherche</span></button>
+    <button class="btn btn-success hidden" id="saveBtn" title="Sauvegarder (Ctrl+S)"><span class="btn-icon">💾</span><span class="btn-text">Sauver</span></button>
+    <button class="btn btn-ghost btn-compact" id="btnAddCol" title="Ajouter une colonne"><span class="btn-icon">+</span><span class="btn-text">Colonne</span></button>
+    <button class="btn btn-ghost btn-compact" id="btnAddRow" title="Ajouter une ligne"><span class="btn-icon">+</span><span class="btn-text">Ligne</span></button>
+
     <div class="btn-dropdown" id="viewsWrap">
-      <button class="btn btn-ghost icon-only-mobile" id="btnViews" title="Vues sauvegardées"><span class="btn-icon">📌</span><span class="btn-text">Vues</span><span style="font-size:10px;opacity:0.6;">▾</span></button>
+      <button class="btn btn-ghost btn-icon-mobile" id="btnViews" title="Vues sauvegardées (filtres + tris)"><span class="btn-icon">📌</span><span class="btn-text">Vues</span><span class="btn-caret">▾</span></button>
       <div class="dropdown-panel hidden" id="viewsPanel"></div>
     </div>
-    <button class="btn btn-ghost icon-only-mobile" id="btnExport" title="Exporter en CSV (vue courante)"><span class="btn-icon">⬇</span><span class="btn-text">Export</span></button>
-    <button class="btn btn-ghost icon-only-mobile" id="btnLib" title="Bibliothèque de formules"><span class="btn-icon">📚</span><span class="btn-text">Formules</span></button>
-    <button class="btn btn-ghost icon-only-mobile" id="btnScripts" title="Scripts (équivalent Apps Script)"><span class="btn-icon">📜</span><span class="btn-text">Scripts</span></button>
-    <button class="btn btn-ghost icon-only-mobile" id="btnIntegrations" title="Intégrations (Google Gmail/Drive/Sheets)"><span class="btn-icon">🔌</span><span class="btn-text">Intégrations</span></button>
-    <button class="btn btn-ghost icon-only-mobile" id="btnHelp" title="Aide formules">?</button>
-    <button class="btn btn-ghost" id="btnAddCol"><span class="btn-icon">+</span><span class="btn-text">Colonne</span></button>
-    <button class="btn btn-ghost" id="btnAddRow"><span class="btn-icon">+</span><span class="btn-text">Ligne</span></button>
-    <button class="btn btn-success hidden" id="saveBtn"><span class="btn-icon">💾</span><span class="btn-text">Sauvegarder</span></button>
-    <button class="btn btn-primary icon-only-mobile" id="btnRefresh" title="Rafraîchir">↻</button>
+
+    <button class="btn btn-primary btn-icon" id="btnRefresh" title="Rafraîchir la table">↻</button>
+
+    <div class="btn-dropdown" id="toolsWrap">
+      <button class="btn btn-ghost btn-icon" id="btnTools" title="Outils : Recherche, Export, Formules, Scripts, Intégrations…">⋯</button>
+      <div class="dropdown-panel hidden" id="toolsPanel">
+        <div class="dp-section">
+          <button class="dp-item" id="btnSearch"><span style="font-size:14px;">🔍</span> Recherche dans la table <span class="dp-meta">Ctrl+F</span></button>
+          <button class="dp-item" id="btnExport"><span style="font-size:14px;">⬇</span> Exporter en CSV</button>
+        </div>
+        <div class="dp-section">
+          <button class="dp-item" id="btnLib"><span style="font-size:14px;">📚</span> Bibliothèque de formules</button>
+          <button class="dp-item" id="btnScripts"><span style="font-size:14px;">📜</span> Scripts (Apps Script)</button>
+          <button class="dp-item" id="btnIntegrations"><span style="font-size:14px;">🔌</span> Intégrations Google</button>
+        </div>
+        <div class="dp-section">
+          <button class="dp-item" id="btnHelp"><span style="font-size:14px;">?</span> Aide formules &amp; raccourcis</button>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
 <!-- ───── Toolbar ───── -->
 <div class="toolbar" id="appToolbar">
-  <span class="selection-info" id="selectionInfo">Astuce : clique sur une en-tête de colonne pour trier / filtrer</span>
+  <span class="selection-info" id="selectionInfo">💡 Clic sur une en-tête de colonne = tri / filtre</span>
   <div class="active-filters" id="activeFilters"></div>
-  <div class="pager">
+  <div class="pager" style="margin-left:auto;">
     <button id="prevPage" title="Page précédente">‹</button>
     <span class="pager-label">Offset</span>
     <input type="number" id="pageOffset" value="0" min="0" step="500">
@@ -540,7 +554,7 @@ Exemple on_edit :
 <!-- ───── Autocomplete dropdown (positionné dynamiquement) ───── -->
 <div id="acDropdown" class="ac-dropdown hidden"></div>
 
-<script src="formulas.js?v=8"></script>
-<script src="app.js?v=8"></script>
+<script src="formulas.js?v=9"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>

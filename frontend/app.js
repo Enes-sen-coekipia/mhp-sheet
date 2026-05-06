@@ -1437,6 +1437,7 @@ function renderViewsPanel() {
 }
 
 function toggleViewsPanel() {
+  closeToolsPanel();
   const panel = $('viewsPanel');
   if (panel.classList.contains('hidden')) {
     renderViewsPanel();
@@ -1456,6 +1457,34 @@ function closeViewsOutside(e) {
     panel.classList.add('hidden');
     document.removeEventListener('mousedown', closeViewsOutside, true);
   }
+}
+
+// ─── Outils dropdown (kebab) ────────────────────────────────
+function toggleToolsPanel() {
+  // Ferme l'autre dropdown si ouvert
+  $('viewsPanel').classList.add('hidden');
+  document.removeEventListener('mousedown', closeViewsOutside, true);
+  const panel = $('toolsPanel');
+  if (panel.classList.contains('hidden')) {
+    panel.classList.remove('hidden');
+    setTimeout(() => document.addEventListener('mousedown', closeToolsOutside, true), 50);
+  } else {
+    panel.classList.add('hidden');
+    document.removeEventListener('mousedown', closeToolsOutside, true);
+  }
+}
+
+function closeToolsPanel() {
+  const panel = $('toolsPanel');
+  if (panel) panel.classList.add('hidden');
+  document.removeEventListener('mousedown', closeToolsOutside, true);
+}
+
+function closeToolsOutside(e) {
+  const panel = $('toolsPanel');
+  const wrap = $('toolsWrap');
+  if (!panel || panel.classList.contains('hidden')) return;
+  if (!wrap.contains(e.target)) closeToolsPanel();
 }
 
 // ============================================================
@@ -1926,10 +1955,10 @@ function bindGlobalEvents() {
   $('btnNewTable').addEventListener('click', openNewTableModal);
   $('btnAddTableColumn').addEventListener('click', addNewTableColumnRow);
   $('btnCreateTable').addEventListener('click', createTable);
-  $('btnHelp').addEventListener('click', () => $('helpModal').classList.remove('hidden'));
-  $('btnLib').addEventListener('click', openLibModal);
-  $('btnScripts').addEventListener('click', openScriptsModal);
-  $('btnIntegrations').addEventListener('click', openIntegrationsModal);
+  // Tools dropdown — chaque action ferme le panneau avant d'ouvrir son modal
+  $('btnTools').addEventListener('click', toggleToolsPanel);
+  $('btnHelp').addEventListener('click', () => { closeToolsPanel(); $('helpModal').classList.remove('hidden'); });
+  $('btnLib').addEventListener('click', () => { closeToolsPanel(); openLibModal(); });
   $('scrBtnNew').addEventListener('click', newScript);
   $('scrBtnSave').addEventListener('click', saveScript);
   $('scrBtnRun').addEventListener('click', runScript);
@@ -1940,9 +1969,11 @@ function bindGlobalEvents() {
     t.addEventListener('click', () => setScriptTab(t.dataset.tab))
   );
   $('libSearch').addEventListener('input', (e) => { lib.search = e.target.value; libRenderList(); });
-  $('btnSearch').addEventListener('click', openSearch);
-  $('btnExport').addEventListener('click', exportCSV);
+  $('btnSearch').addEventListener('click', () => { closeToolsPanel(); openSearch(); });
+  $('btnExport').addEventListener('click', () => { closeToolsPanel(); exportCSV(); });
   $('btnViews').addEventListener('click', toggleViewsPanel);
+  $('btnScripts').addEventListener('click', () => { closeToolsPanel(); openScriptsModal(); });
+  $('btnIntegrations').addEventListener('click', () => { closeToolsPanel(); openIntegrationsModal(); });
 
   // Search bar
   $('searchInput').addEventListener('input', (e) => runSearch(e.target.value));
