@@ -34,6 +34,9 @@ def _build_runner_code(user_code: str, sandboxed: bool) -> str:
     # Mode sandbox : RestrictedPython compile le code utilisateur avec un
     # ensemble réduit de builtins. Empêche `__import__('os').system(...)` et
     # autres techniques d'évasion classiques. La lib `mhp` reste accessible.
+    # Whitelist d'imports autorisés en mode sandbox.
+    # `mhp` est de toute façon déjà injecté dans les globals — l'inclure permet juste
+    # à l'utilisateur d'écrire `import mhp` par habitude sans erreur.
     return (
         "import sys\n"
         "import mhp_lib as mhp\n"
@@ -41,12 +44,24 @@ def _build_runner_code(user_code: str, sandboxed: bool) -> str:
         "from RestrictedPython import compile_restricted, safe_globals, limited_builtins, utility_builtins\n"
         "from RestrictedPython.Guards import safer_getattr, full_write_guard\n"
         "from RestrictedPython.Eval import default_guarded_getitem, default_guarded_getiter\n"
+        "_ALLOWED_MODULES = {'math','json','datetime','re','time','random','statistics',\n"
+        "                    'collections','itertools','functools','decimal','base64',\n"
+        "                    'csv','io','urllib.parse','mhp','mhp_lib'}\n"
+        "def _safe_import(name, globals=None, locals=None, fromlist=(), level=0):\n"
+        "    base = name.split('.')[0]\n"
+        "    if base in _ALLOWED_MODULES or name in _ALLOWED_MODULES:\n"
+        "        return __import__(name, globals, locals, fromlist, level)\n"
+        "    raise ImportError('Module ' + repr(name) + ' non autorisé en sandbox')\n"
         "user_src = '''\\\n"
         + user_code.replace("\\", "\\\\").replace("'''", r"\'\'\'") + "\n'''\n"
         "byte_code = compile_restricted(user_src, '<user_script>', 'exec')\n"
         "g = dict(safe_globals)\n"
         "g.update(utility_builtins)\n"
         "g.update(limited_builtins)\n"
+        "_b = dict(g.get('__builtins__', {}))\n"
+        "_b['__import__'] = _safe_import\n"
+        "_b['print'] = print\n"
+        "g['__builtins__'] = _b\n"
         "g['mhp'] = mhp\n"
         "g['_getattr_'] = safer_getattr\n"
         "g['_getitem_'] = default_guarded_getitem\n"
