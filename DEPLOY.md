@@ -219,6 +219,96 @@ C:\nssm\nssm.exe remove MHP-Datasheet-Backend confirm
 
 Pas de conflit avec `MHP_app` (8080), `MySQL` (3306) ou `Backend MHP_app` (8000).
 
+## Configuration OAuth Google (Gmail / Drive / Sheets)
+
+Pour permettre aux scripts d'utiliser `mhp.gmail`, `mhp.drive`, `mhp.sheets`.
+
+### A. Côté Google Cloud Console (une seule fois)
+
+1. **Créer un projet GCP** : https://console.cloud.google.com → "Sélectionner un projet" → "Nouveau projet" → nom : `mhp-datasheet`.
+
+2. **Activer les API** : Menu → APIs & Services → Bibliothèque → activer ces 3 APIs :
+   - **Gmail API**
+   - **Google Drive API**
+   - **Google Sheets API**
+
+3. **Configurer l'écran de consentement OAuth** : Menu → APIs & Services → "OAuth consent screen" → Type : **Externe** (ou Interne si compte Google Workspace MHP) → Nom application : `MHP DataSheet` → email support : email du client → Save.
+   - Ajouter dans "Test users" l'email du compte robot qu'on va connecter (ex : `compte-mhp@gmail.com`). Tant que l'app est en mode "Testing", seuls ces utilisateurs peuvent l'utiliser.
+
+4. **Créer les credentials OAuth 2.0** : Menu → APIs & Services → Credentials → "+ CREATE CREDENTIALS" → "OAuth client ID" → Type : **Web application** → Nom : `MHP DataSheet Web` → **URIs de redirection autorisées** :
+   ```
+   http://192.168.1.7:8081/api/integrations/google/callback
+   http://localhost:3000/api/integrations/google/callback
+   ```
+   (la 1ʳᵉ pour la prod, la 2ᵉ pour le dev)
+   → "Create" → noter le **Client ID** et le **Client secret**.
+
+### B. Côté serveur Windows
+
+Dans `C:\MHP\mhp-datasheet\.env`, ajouter :
+
+```
+GOOGLE_OAUTH_CLIENT_ID=xxxxxxxxxx.apps.googleusercontent.com
+GOOGLE_OAUTH_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxx
+GOOGLE_OAUTH_REDIRECT_URI=http://192.168.1.7:8081/api/integrations/google/callback
+```
+
+Restart :
+
+```powershell
+C:\nssm\nssm.exe restart MHP-Datasheet-Backend
+```
+
+### C. Connecter le compte
+
+1. Ouvrir http://192.168.1.7:8081
+2. Cliquer **🔌 Intégrations** dans le header
+3. Cliquer **🔗 Connecter un compte Google** → popup Google
+4. Choisir le compte robot, accepter les permissions
+5. La popup se ferme, le statut passe à **✓ Connecté**
+
+Les scripts peuvent maintenant utiliser `mhp.gmail`, `mhp.drive`, `mhp.sheets`. Le refresh token est stocké en BD et auto-utilisé quand l'access token expire (1h).
+
+### D. Migration de tes scripts Apps Script
+
+Voici comment réécrire `importStockItReport()` (Apps Script → notre app) :
+
+```python
+import mhp
+
+# Récupère le mail le plus récent avec le libellé "stockit"
+msg = mhp.gmail.get_latest_with_label('stockit', max_age_days=2)
+if not msg:
+    mhp.log("Aucun mail trouvé"); raise SystemExit
+
+# Première pièce jointe
+atts = mhp.gmail.get_attachments(msg['id'])
+if not atts:
+    mhp.log("Pas de pièce jointe"); raise SystemExit
+att = atts[0]
+
+# Upload + conversion XLSX → Google Sheets
+sheet_file = mhp.drive.upload_and_convert_to_sheets(
+    name=f"Temp_StockIt_{att['filename']}",
+    content=att['data'],
+)
+
+# Export en CSV
+csv_text = mhp.drive.export_csv(sheet_file['id'])
+mhp.drive.delete(sheet_file['id'])  # cleanup
+
+# Parse CSV et insère dans Postgres
+import csv as _csv, io
+rows = list(_csv.reader(io.StringIO(csv_text), delimiter=','))
+data_rows = rows[1:]  # skip header
+
+t = mhp.table('stock_it')
+n = t.append_rows([dict(zip(t.columns, r)) for r in data_rows])
+mhp.log(f"✅ {n} lignes importées dans stock_it")
+```
+
+À programmer en cron type `0 7 * * *` (tous les jours à 7h) dans la modale Scripts.
+
 ## Restriction LAN (recommandé)
 
 Décommenter le bloc `allow / deny` dans `deploy/mhp-datasheet.nginx.conf` (ou la copie dans `C:\nginx\conf\sites\`), adapter le subnet (`192.168.1.0/24` par défaut), puis :

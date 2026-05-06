@@ -277,3 +277,169 @@ class _Mail:
 
 
 mail = _Mail()
+
+
+# ─── Google (Gmail / Drive / Sheets) ─────────────────────────
+# Lazy imports : si on n'utilise pas Google, pas besoin que les libs
+# google-auth-* soient installées (utile pour les scripts pure-DB / HTTP).
+def _g_service(name):
+    from services.google import gmail_service, drive_service, sheets_service
+    return {"gmail": gmail_service, "drive": drive_service, "sheets": sheets_service}[name]()
+
+
+class _Gmail:
+    """Helper Gmail. Compte connecté via Intégrations → Google."""
+
+    def search(self, query: str, max_results: int = 25):
+        """Cherche des messages selon la syntaxe Gmail (ex: 'label:stockit has:attachment newer_than:2d')."""
+        svc = _g_service("gmail")
+        res = svc.users().messages().list(userId="me", q=query, maxResults=max_results).execute()
+        return res.get("messages", [])
+
+    def get_message(self, message_id: str, fmt: str = "full"):
+        svc = _g_service("gmail")
+        return svc.users().messages().get(userId="me", id=message_id, format=fmt).execute()
+
+    def get_attachments(self, message_id: str):
+        """Renvoie [{filename, mime_type, data (bytes), attachment_id}] pour ce message."""
+        import base64
+        svc = _g_service("gmail")
+        msg = svc.users().messages().get(userId="me", id=message_id, format="full").execute()
+        out = []
+        def walk(parts):
+            for p in parts or []:
+                fn = p.get("filename") or ""
+                body = p.get("body") or {}
+                aid = body.get("attachmentId")
+                if fn and aid:
+                    att = svc.users().messages().attachments().get(
+                        userId="me", messageId=message_id, id=aid
+                    ).execute()
+                    data = base64.urlsafe_b64decode(att["data"].encode("utf-8"))
+                    out.append({
+                        "filename": fn,
+                        "mime_type": p.get("mimeType", ""),
+                        "data": data,
+                        "size": len(data),
+                        "attachment_id": aid,
+                    })
+                if p.get("parts"):
+                    walk(p["parts"])
+        walk((msg.get("payload") or {}).get("parts"))
+        return out
+
+    def get_latest_with_label(self, label: str, max_age_days: int = 7):
+        """Helper : retourne le message le plus récent avec ce libellé (ou None)."""
+        msgs = self.search(f"label:{label} newer_than:{max_age_days}d", max_results=1)
+        if not msgs:
+            return None
+        return self.get_message(msgs[0]["id"])
+
+    def add_label(self, message_id: str, label_id: str):
+        svc = _g_service("gmail")
+        svc.users().messages().modify(
+            userId="me", id=message_id, body={"addLabelIds": [label_id]}
+        ).execute()
+
+    def list_labels(self):
+        svc = _g_service("gmail")
+        return svc.users().labels().list(userId="me").execute().get("labels", [])
+
+
+class _Drive:
+    """Helper Drive."""
+
+    def upload(self, name: str, content: bytes, mime_type: str = "application/octet-stream",
+               folder_id: str | None = None):
+        """Upload un fichier. Retourne l'objet file (id, name, etc.)."""
+        from googleapiclient.http import MediaInMemoryUpload
+        svc = _g_service("drive")
+        meta = {"name": name}
+        if folder_id:
+            meta["parents"] = [folder_id]
+        media = MediaInMemoryUpload(content, mimetype=mime_type)
+        return svc.files().create(body=meta, media_body=media, fields="id,name,mimeType,webViewLink").execute()
+
+    def upload_and_convert_to_sheets(self, name: str, content: bytes,
+                                     source_mime: str = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"):
+        """Upload un .xlsx et le convertit en Google Sheets. Retourne le file id du Sheets."""
+        from googleapiclient.http import MediaInMemoryUpload
+        svc = _g_service("drive")
+        meta = {"name": name, "mimeType": "application/vnd.google-apps.spreadsheet"}
+        media = MediaInMemoryUpload(content, mimetype=source_mime, resumable=False)
+        f = svc.files().create(body=meta, media_body=media, fields="id,name").execute()
+        return f
+
+    def export(self, file_id: str, mime_type: str = "text/csv") -> bytes:
+        """Exporte un Google file (Sheets/Docs) au format demandé. Retourne bytes."""
+        svc = _g_service("drive")
+        return svc.files().export(fileId=file_id, mimeType=mime_type).execute()
+
+    def export_csv(self, file_id: str) -> str:
+        """Exporte un Google Sheets en CSV (texte)."""
+        return self.export(file_id, "text/csv").decode("utf-8", errors="replace")
+
+    def download(self, file_id: str) -> bytes:
+        svc = _g_service("drive")
+        return svc.files().get_media(fileId=file_id).execute()
+
+    def get(self, file_id: str):
+        svc = _g_service("drive")
+        return svc.files().get(fileId=file_id, fields="id,name,mimeType,parents,webViewLink").execute()
+
+    def list_in_folder(self, folder_id: str, mime_type: str | None = None):
+        svc = _g_service("drive")
+        q = f"'{folder_id}' in parents and trashed=false"
+        if mime_type:
+            q += f" and mimeType='{mime_type}'"
+        res = svc.files().list(q=q, fields="files(id,name,mimeType,parents)").execute()
+        return res.get("files", [])
+
+    def delete(self, file_id: str, trash: bool = True):
+        """trash=True (défaut) → met à la corbeille. trash=False → suppression définitive."""
+        svc = _g_service("drive")
+        if trash:
+            svc.files().update(fileId=file_id, body={"trashed": True}).execute()
+        else:
+            svc.files().delete(fileId=file_id).execute()
+
+    def find_folder(self, name: str, parent_id: str | None = None):
+        """Trouve un dossier par nom. Retourne le 1er match ou None."""
+        svc = _g_service("drive")
+        q = f"name='{name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+        if parent_id:
+            q += f" and '{parent_id}' in parents"
+        res = svc.files().list(q=q, fields="files(id,name,parents)").execute().get("files", [])
+        return res[0] if res else None
+
+
+class _Sheets:
+    """Helper Sheets (lecture/écriture sur un Google Sheets existant)."""
+
+    def get_values(self, spreadsheet_id: str, range_a1: str):
+        svc = _g_service("sheets")
+        res = svc.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=range_a1).execute()
+        return res.get("values", [])
+
+    def set_values(self, spreadsheet_id: str, range_a1: str, values: list[list]):
+        svc = _g_service("sheets")
+        return svc.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id, range=range_a1,
+            valueInputOption="USER_ENTERED",
+            body={"values": values},
+        ).execute()
+
+    def append_values(self, spreadsheet_id: str, range_a1: str, values: list[list]):
+        svc = _g_service("sheets")
+        return svc.spreadsheets().values().append(
+            spreadsheetId=spreadsheet_id, range=range_a1,
+            valueInputOption="USER_ENTERED",
+            insertDataOption="INSERT_ROWS",
+            body={"values": values},
+        ).execute()
+
+
+gmail = _Gmail()
+drive = _Drive()
+sheets = _Sheets()
+

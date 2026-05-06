@@ -1734,6 +1734,106 @@ function setScriptTab(tab) {
 }
 
 // ============================================================
+//  INTEGRATIONS — OAuth Google (Gmail/Drive/Sheets)
+// ============================================================
+async function openIntegrationsModal() {
+  $('integrationsModal').classList.remove('hidden');
+  await refreshGoogleStatus();
+}
+
+async function refreshGoogleStatus() {
+  const statusEl = $('googleStatus');
+  const bodyEl = $('googleBody');
+  const helpEl = $('googleHelp');
+  statusEl.innerHTML = '<span class="ig-pill ig-loading">…</span>';
+  bodyEl.innerHTML = '';
+  helpEl.style.display = 'none';
+
+  let s;
+  try {
+    s = await api('/integrations/google/status');
+  } catch (e) {
+    statusEl.innerHTML = '<span class="ig-pill ig-bad">Erreur</span>';
+    bodyEl.innerHTML = `<div style="color:var(--red);font-size:12px;">${escapeHTML(e.message)}</div>`;
+    return;
+  }
+
+  if (!s.configured) {
+    statusEl.innerHTML = '<span class="ig-pill ig-off">Non configuré</span>';
+    helpEl.style.display = '';
+    bodyEl.innerHTML = `<div class="ig-row"><strong>Redirect URI à configurer dans GCP :</strong></div>
+      <div><code>${escapeHTML(s.redirect_uri || '?')}</code></div>`;
+    return;
+  }
+
+  if (!s.connected) {
+    statusEl.innerHTML = '<span class="ig-pill ig-off">Non connecté</span>';
+    bodyEl.innerHTML = `
+      <div class="ig-row"><strong>Redirect URI configurée :</strong></div>
+      <div><code>${escapeHTML(s.redirect_uri)}</code></div>
+      <div style="margin-top:10px;">
+        <button class="btn btn-primary" id="googleBtnConnect">🔗 Connecter un compte Google</button>
+      </div>
+      <div class="form-hint" style="margin-top:8px;">
+        Une fenêtre Google s'ouvre. Choisis le compte (ex : <code>compte-mhp@gmail.com</code>),
+        accepte les permissions Gmail/Drive/Sheets, et reviens ici.
+      </div>`;
+    $('googleBtnConnect').addEventListener('click', startGoogleConnect);
+    return;
+  }
+
+  statusEl.innerHTML = '<span class="ig-pill ig-on">✓ Connecté</span>';
+  const scopesShort = (s.scopes || []).map((sc) => sc.split('/').pop()).filter(Boolean).join(', ');
+  bodyEl.innerHTML = `
+    <div class="ig-row"><strong>Compte :</strong> ${escapeHTML(s.account_email || '?')}</div>
+    <div class="ig-row"><strong>Connecté le :</strong> ${escapeHTML(s.connected_at ? new Date(s.connected_at).toLocaleString('fr-FR') : '?')}</div>
+    ${s.refreshed_at ? `<div class="ig-row"><strong>Dernier refresh :</strong> ${escapeHTML(new Date(s.refreshed_at).toLocaleString('fr-FR'))}</div>` : ''}
+    <div class="ig-row"><strong>Scopes :</strong> <span style="font-size:10.5px;color:var(--text3);">${escapeHTML(scopesShort)}</span></div>
+    <div style="margin-top:12px;display:flex;gap:8px;">
+      <button class="btn btn-ghost" id="googleBtnReconnect">🔄 Reconnecter</button>
+      <button class="btn btn-danger" id="googleBtnDisconnect">⏏ Déconnecter</button>
+    </div>
+    <div class="form-hint" style="margin-top:10px;">
+      Les scripts Python peuvent maintenant utiliser :<br>
+      <code>mhp.gmail.search('label:stockit has:attachment')</code> · <code>mhp.drive.export_csv(file_id)</code> · <code>mhp.sheets.get_values(...)</code>
+    </div>`;
+  $('googleBtnReconnect').addEventListener('click', startGoogleConnect);
+  $('googleBtnDisconnect').addEventListener('click', disconnectGoogle);
+}
+
+async function startGoogleConnect() {
+  try {
+    const r = await api('/integrations/google/connect');
+    // Ouvre Google dans une nouvelle fenêtre
+    const win = window.open(r.authorization_url, 'google-oauth', 'width=540,height=720,resizable=yes,scrollbars=yes');
+    if (!win) {
+      toast('Popup bloquée — autorise les popups pour ce site', 'red');
+      return;
+    }
+    // Poll jusqu'à fermeture
+    const poll = setInterval(async () => {
+      if (win.closed) {
+        clearInterval(poll);
+        await refreshGoogleStatus();
+      }
+    }, 1000);
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'red');
+  }
+}
+
+async function disconnectGoogle() {
+  if (!confirm('Déconnecter le compte Google ? Les scripts qui utilisent mhp.gmail/drive/sheets ne fonctionneront plus.')) return;
+  try {
+    await api('/integrations/google', { method: 'DELETE' });
+    toast('Compte Google déconnecté', 'orange');
+    await refreshGoogleStatus();
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'red');
+  }
+}
+
+// ============================================================
 //  CREATE TABLE (modal "Nouvelle table")
 // ============================================================
 const COL_TYPES = ['TEXT', 'NUMERIC', 'INTEGER', 'BIGINT', 'DATE', 'TIMESTAMP', 'BOOLEAN', 'JSONB'];
@@ -1829,6 +1929,7 @@ function bindGlobalEvents() {
   $('btnHelp').addEventListener('click', () => $('helpModal').classList.remove('hidden'));
   $('btnLib').addEventListener('click', openLibModal);
   $('btnScripts').addEventListener('click', openScriptsModal);
+  $('btnIntegrations').addEventListener('click', openIntegrationsModal);
   $('scrBtnNew').addEventListener('click', newScript);
   $('scrBtnSave').addEventListener('click', saveScript);
   $('scrBtnRun').addEventListener('click', runScript);

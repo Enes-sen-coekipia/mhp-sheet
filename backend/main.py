@@ -29,6 +29,7 @@ from config import settings
 from db import close_pool, init_pool, ping
 from routes.data import router as data_router
 from routes.formulas import router as formulas_router
+from routes.integrations import router as integrations_router
 from routes.scripts import router as scripts_router
 from services.scheduler import init_scheduler, shutdown_scheduler
 
@@ -59,6 +60,7 @@ app = FastAPI(title="MHP DataSheet API", version="2.0.0", lifespan=lifespan)
 app.include_router(data_router)
 app.include_router(formulas_router)
 app.include_router(scripts_router)
+app.include_router(integrations_router)
 
 # CORS — vide par défaut (même origine via Nginx)
 if settings.cors_origins:

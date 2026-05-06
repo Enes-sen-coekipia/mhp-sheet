@@ -30,5 +30,12 @@ class Settings(BaseSettings):
     default_page_size: int = 500
     max_page_size: int = 5000
 
+    # ─── OAuth Google (Gmail/Drive/Sheets) ───
+    # Créer un projet GCP, activer Gmail/Drive/Sheets API, créer des credentials OAuth 2.0
+    # de type "Application Web" et ajouter l'URL de callback aux URI autorisées.
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    google_oauth_redirect_uri: str = "http://localhost:3000/api/integrations/google/callback"
+
 
 settings = Settings()

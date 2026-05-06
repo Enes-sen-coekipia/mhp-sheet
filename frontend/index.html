@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MHP DataSheet</title>
-<link rel="stylesheet" href="styles.css?v=7">
+<link rel="stylesheet" href="styles.css?v=8">
 <!-- HyperFormula : moteur Sheets-compatible (~400 fonctions, FR) -->
 <script src="https://cdn.jsdelivr.net/npm/hyperformula/dist/hyperformula.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hyperformula/dist/languages/frFR.min.js"></script>
@@ -40,6 +40,7 @@
     <button class="btn btn-ghost icon-only-mobile" id="btnExport" title="Exporter en CSV (vue courante)"><span class="btn-icon">⬇</span><span class="btn-text">Export</span></button>
     <button class="btn btn-ghost icon-only-mobile" id="btnLib" title="Bibliothèque de formules"><span class="btn-icon">📚</span><span class="btn-text">Formules</span></button>
     <button class="btn btn-ghost icon-only-mobile" id="btnScripts" title="Scripts (équivalent Apps Script)"><span class="btn-icon">📜</span><span class="btn-text">Scripts</span></button>
+    <button class="btn btn-ghost icon-only-mobile" id="btnIntegrations" title="Intégrations (Google Gmail/Drive/Sheets)"><span class="btn-icon">🔌</span><span class="btn-text">Intégrations</span></button>
     <button class="btn btn-ghost icon-only-mobile" id="btnHelp" title="Aide formules">?</button>
     <button class="btn btn-ghost" id="btnAddCol"><span class="btn-icon">+</span><span class="btn-text">Colonne</span></button>
     <button class="btn btn-ghost" id="btnAddRow"><span class="btn-icon">+</span><span class="btn-text">Ligne</span></button>
@@ -407,7 +408,44 @@ mhp.http.delete('...')</pre>
     </div>
 
     <div class="help-block">
-      <div class="help-title">📧 Mail</div>
+      <div class="help-title">📨 Gmail (compte connecté via Intégrations)</div>
+      <pre class="lib-example">msgs = mhp.gmail.search('label:stockit has:attachment newer_than:2d')
+msg  = mhp.gmail.get_message(msgs[0]['id'])
+atts = mhp.gmail.get_attachments(msgs[0]['id'])
+# atts[0] = {'filename', 'mime_type', 'data' (bytes), 'size', 'attachment_id'}
+
+# Helper : 1 mail le plus récent avec un libellé
+m = mhp.gmail.get_latest_with_label('stockit', max_age_days=2)
+
+# Lister les libellés
+labels = mhp.gmail.list_labels()</pre>
+    </div>
+
+    <div class="help-block">
+      <div class="help-title">💾 Drive (compte connecté via Intégrations)</div>
+      <pre class="lib-example"># Upload + conversion XLSX → Google Sheets (comme Apps Script)
+file = mhp.drive.upload_and_convert_to_sheets('Temp_StockIt', xlsx_bytes)
+csv  = mhp.drive.export_csv(file['id'])
+mhp.drive.delete(file['id'])  # corbeille
+
+# Lister les fichiers d'un dossier
+folder = mhp.drive.find_folder('CSV_A_Importer')
+files = mhp.drive.list_in_folder(folder['id'], mime_type='text/csv')
+
+# Download brut (bytes)
+data = mhp.drive.download(file_id)</pre>
+    </div>
+
+    <div class="help-block">
+      <div class="help-title">📊 Google Sheets (compte connecté via Intégrations)</div>
+      <pre class="lib-example">SHEET = '1zy1D56ksDhWWfoLbJil4OQmm2AceA80_iQayDcuxOp4'
+rows = mhp.sheets.get_values(SHEET, 'Stock_It!A1:J1000')
+mhp.sheets.append_values(SHEET, 'Stock_It!A:J', [['date','val','...']])
+mhp.sheets.set_values(SHEET, 'Stock_It!A2', [['nouveau']])</pre>
+    </div>
+
+    <div class="help-block">
+      <div class="help-title">📧 Mail SMTP (sans Gmail OAuth)</div>
       <pre class="lib-example">mhp.mail.send(to='admin@mhp.fr',
               subject='Rapport',
               body='texte brut',
@@ -469,10 +507,40 @@ Exemple on_edit :
   </div>
 </div>
 
+<!-- ───── Modal Intégrations (OAuth Google) ───── -->
+<div class="modal-overlay hidden" id="integrationsModal">
+  <div class="modal" style="width:600px;max-width:95vw;">
+    <h3>🔌 Intégrations</h3>
+
+    <div class="integration-card" id="googleCard">
+      <div class="integration-head">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div class="integration-icon">G</div>
+          <div>
+            <div style="font-weight:600;">Google Workspace</div>
+            <div style="font-size:11px;color:var(--text3);">Gmail · Drive · Sheets</div>
+          </div>
+        </div>
+        <div id="googleStatus"><span class="ig-pill ig-loading">…</span></div>
+      </div>
+      <div id="googleBody" class="integration-body"></div>
+      <div id="googleHelp" class="form-hint" style="display:none;">
+        ⚠️ OAuth Google n'est pas configuré.<br>
+        Renseigne <code>GOOGLE_OAUTH_CLIENT_ID</code> et <code>GOOGLE_OAUTH_CLIENT_SECRET</code> dans <code>.env</code>
+        puis redémarre le backend. Voir <strong>DEPLOY.md §Configuration OAuth Google</strong>.
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-primary" data-close="integrationsModal">Fermer</button>
+    </div>
+  </div>
+</div>
+
 <!-- ───── Autocomplete dropdown (positionné dynamiquement) ───── -->
 <div id="acDropdown" class="ac-dropdown hidden"></div>
 
-<script src="formulas.js?v=7"></script>
-<script src="app.js?v=7"></script>
+<script src="formulas.js?v=8"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>

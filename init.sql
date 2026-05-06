@@ -58,6 +58,18 @@ CREATE TABLE IF NOT EXISTS _mhp_script_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_script_runs_script ON _mhp_script_runs(script_id, started_at DESC);
 
+-- ─── Intégrations OAuth (Google Gmail/Drive/Sheets/BigQuery) ───
+CREATE TABLE IF NOT EXISTS _mhp_integrations (
+    provider       TEXT NOT NULL,                  -- 'google'
+    account_id     TEXT NOT NULL,                  -- email du compte connecté
+    account_email  TEXT,
+    scopes         TEXT,
+    raw_token      JSONB NOT NULL,                 -- objet credentials sérialisé (token + refresh_token + expiry)
+    connected_at   TIMESTAMP NOT NULL DEFAULT NOW(),
+    refreshed_at   TIMESTAMP,
+    PRIMARY KEY (provider, account_id)
+);
+
 -- ─── Indexes pour accélérer les RECHERCHEV-via-SQL et filtres usuels ───
 -- À jouer manuellement sur une BD existante :
 --   docker exec -i mhp_postgres psql -U mhp_user -d pilotage_mhp < init.sql
