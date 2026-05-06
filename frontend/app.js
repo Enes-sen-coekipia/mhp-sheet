@@ -855,7 +855,7 @@ function stopEdit(save) {
     recordUndo(ri, ci, original);
     state.rows[ri][col] = newVal;
     updateHFCell(ri, ci, newVal);
-    state.pending.set(`${key}::${col}`, { primaryVal: key, column: col, value: newVal === '' ? null : newVal });
+    state.pending.set(`${key}::${col}`, { primary_val: key, column: col, value: newVal === '' ? null : newVal });
     markModified();
     renderTable();   // re-rendu : les formules dépendantes se mettent à jour
     // Re-sélectionne la même cellule
@@ -885,7 +885,7 @@ function onFormulaKey(e) {
   recordUndo(ri, ci, prev);
   state.rows[ri][col] = val;
   updateHFCell(ri, ci, val);
-  state.pending.set(`${key}::${col}`, { primaryVal: key, column: col, value: val === '' ? null : val });
+  state.pending.set(`${key}::${col}`, { primary_val: key, column: col, value: val === '' ? null : val });
   markModified();
   renderTable();
 }
@@ -1305,7 +1305,7 @@ function undo() {
   updateHFCell(ri, ci, oldRaw);
   const key = state.rowKeys[ri];
   state.pending.set(`${key}::${col}`, {
-    primaryVal: key, column: col,
+    primary_val: key, column: col,
     value: (oldRaw == null || oldRaw === '') ? null : oldRaw,
   });
   markModified();
@@ -1562,7 +1562,7 @@ function onGlobalKey(e) {
       state.rows[ri][col] = '';
       updateHFCell(ri, ci, '');
       const k = state.rowKeys[ri];
-      state.pending.set(`${k}::${col}`, { primaryVal: k, column: col, value: null });
+      state.pending.set(`${k}::${col}`, { primary_val: k, column: col, value: null });
       markModified();
       renderTable();
     }
