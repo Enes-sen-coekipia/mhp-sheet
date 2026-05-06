@@ -1509,8 +1509,20 @@ mhp.log("Terminé")
 
 async function openScriptsModal() {
   $('scriptsModal').classList.remove('hidden');
+  // Remplit le select des tables pour les triggers on_edit / on_row_add
+  try {
+    const d = await api('/tables');
+    const sel = $('scrTriggerTable');
+    sel.innerHTML = '<option value="">— toutes les tables —</option>'
+      + d.tables.map((t) => `<option value="${escapeHTML(t)}">${escapeHTML(t)}</option>`).join('');
+  } catch {}
   await loadMonaco();
   await refreshScriptsList();
+}
+
+function updateTriggerInputs(triggerType) {
+  $('scrCron').style.display         = triggerType === 'cron' ? '' : 'none';
+  $('scrTriggerTable').style.display = (triggerType === 'on_edit' || triggerType === 'on_row_add') ? '' : 'none';
 }
 
 function closeScriptsModal() {
@@ -1587,8 +1599,10 @@ async function loadScript(id) {
     $('scrName').value = s.name;
     $('scrTriggerType').value = s.trigger_type;
     $('scrCron').value = s.trigger_cron || '';
-    $('scrCron').style.display = s.trigger_type === 'cron' ? '' : 'none';
+    $('scrTriggerTable').value = s.trigger_table || '';
+    updateTriggerInputs(s.trigger_type);
     $('scrEnabled').checked = !!s.enabled;
+    $('scrSandboxed').checked = !!s.sandboxed;
     if (scr.editor) scr.editor.setValue(s.code || '');
     $('scrOutput').textContent = '— Pas d\'exécution depuis le chargement —';
     $('scrOutput').classList.remove('error');
@@ -1618,7 +1632,9 @@ async function saveScript() {
     code: scr.editor ? scr.editor.getValue() : '',
     trigger_type: $('scrTriggerType').value,
     trigger_cron: $('scrCron').value.trim() || null,
+    trigger_table: $('scrTriggerTable').value || null,
     enabled: $('scrEnabled').checked,
+    sandboxed: $('scrSandboxed').checked,
   };
   try {
     await api(`/scripts/${scr.current.id}`, { method: 'PUT', body: JSON.stringify(payload) });
@@ -1718,6 +1734,63 @@ function setScriptTab(tab) {
 }
 
 // ============================================================
+//  CREATE TABLE (modal "Nouvelle table")
+// ============================================================
+const COL_TYPES = ['TEXT', 'NUMERIC', 'INTEGER', 'BIGINT', 'DATE', 'TIMESTAMP', 'BOOLEAN', 'JSONB'];
+
+function openNewTableModal() {
+  $('newTableName').value = '';
+  const container = $('newTableColumns');
+  container.innerHTML = '';
+  // 2 colonnes par défaut (la 1ère sera PK)
+  addNewTableColumnRow();
+  addNewTableColumnRow();
+  $('newTableModal').classList.remove('hidden');
+  setTimeout(() => $('newTableName').focus(), 50);
+}
+
+function addNewTableColumnRow() {
+  const container = $('newTableColumns');
+  const i = container.children.length;
+  const div = document.createElement('div');
+  div.className = 'new-tbl-col';
+  div.style.cssText = 'display:flex;gap:6px;margin-bottom:4px;align-items:center;';
+  div.innerHTML = `
+    <span style="font-size:11px;color:var(--text3);min-width:18px;">${i + 1}.</span>
+    <input class="form-input col-name" placeholder="${i === 0 ? 'clé_primaire' : 'nom_colonne'}" style="flex:2;height:30px;font-size:12px;">
+    <select class="form-select col-type" style="flex:1;height:30px;font-size:12px;">
+      ${COL_TYPES.map((t) => `<option value="${t}">${t}</option>`).join('')}
+    </select>
+    <button class="btn btn-ghost col-rm" style="padding:0 8px;height:30px;color:var(--red);">×</button>
+  `;
+  container.appendChild(div);
+  div.querySelector('.col-rm').addEventListener('click', () => {
+    if (container.children.length > 1) div.remove();
+  });
+}
+
+async function createTable() {
+  const name = $('newTableName').value.trim();
+  if (!name) { toast('Nom de table requis', 'red'); return; }
+  const cols = [];
+  document.querySelectorAll('#newTableColumns .new-tbl-col').forEach((row) => {
+    const n = row.querySelector('.col-name').value.trim();
+    const t = row.querySelector('.col-type').value;
+    if (n) cols.push({ name: n, col_type: t });
+  });
+  if (cols.length === 0) { toast('Au moins une colonne requise', 'red'); return; }
+  try {
+    const r = await api('/tables', { method: 'POST', body: JSON.stringify({ name, columns: cols }) });
+    closeModal('newTableModal');
+    await loadTables();
+    await loadTable(r.created);
+    toast(`✓ Table "${r.created}" créée (${r.columns.length} colonnes)`, 'green');
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'red');
+  }
+}
+
+// ============================================================
 //  Utils
 // ============================================================
 function closeModal(id) { $(id).classList.add('hidden'); }
@@ -1750,6 +1823,9 @@ function bindGlobalEvents() {
   $('saveBtn').addEventListener('click', saveAllChanges);
   $('btnRefresh').addEventListener('click', () => loadTable(state.table, { resetOffset: false }));
   $('btnDropTable').addEventListener('click', dropTable);
+  $('btnNewTable').addEventListener('click', openNewTableModal);
+  $('btnAddTableColumn').addEventListener('click', addNewTableColumnRow);
+  $('btnCreateTable').addEventListener('click', createTable);
   $('btnHelp').addEventListener('click', () => $('helpModal').classList.remove('hidden'));
   $('btnLib').addEventListener('click', openLibModal);
   $('btnScripts').addEventListener('click', openScriptsModal);
@@ -1758,9 +1834,7 @@ function bindGlobalEvents() {
   $('scrBtnRun').addEventListener('click', runScript);
   $('scrBtnDel').addEventListener('click', deleteCurrentScript);
   $('scrBtnHelp').addEventListener('click', () => $('scrHelpModal').classList.remove('hidden'));
-  $('scrTriggerType').addEventListener('change', (e) => {
-    $('scrCron').style.display = e.target.value === 'cron' ? '' : 'none';
-  });
+  $('scrTriggerType').addEventListener('change', (e) => updateTriggerInputs(e.target.value));
   document.querySelectorAll('.scr-tab').forEach((t) =>
     t.addEventListener('click', () => setScriptTab(t.dataset.tab))
   );

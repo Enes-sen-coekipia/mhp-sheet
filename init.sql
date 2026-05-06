@@ -33,12 +33,17 @@ CREATE TABLE IF NOT EXISTS _mhp_scripts (
     description   TEXT,
     language      TEXT NOT NULL DEFAULT 'python',
     code          TEXT NOT NULL DEFAULT '',
-    trigger_type  TEXT NOT NULL DEFAULT 'manual',  -- 'manual' | 'cron'
+    trigger_type  TEXT NOT NULL DEFAULT 'manual',  -- 'manual' | 'cron' | 'on_edit' | 'on_row_add'
     trigger_cron  TEXT,                            -- ex: '0 8 * * *'
+    trigger_table TEXT,                            -- table cible pour on_edit / on_row_add
     enabled       BOOLEAN NOT NULL DEFAULT TRUE,
+    sandboxed     BOOLEAN NOT NULL DEFAULT FALSE,  -- si TRUE : exécution via RestrictedPython
     created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at    TIMESTAMP NOT NULL DEFAULT NOW()
 );
+-- Migrations idempotentes pour BD existantes
+ALTER TABLE _mhp_scripts ADD COLUMN IF NOT EXISTS trigger_table TEXT;
+ALTER TABLE _mhp_scripts ADD COLUMN IF NOT EXISTS sandboxed BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE TABLE IF NOT EXISTS _mhp_script_runs (
     id            SERIAL PRIMARY KEY,

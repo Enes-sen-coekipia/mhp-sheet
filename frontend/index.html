@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MHP DataSheet</title>
-<link rel="stylesheet" href="styles.css?v=6">
+<link rel="stylesheet" href="styles.css?v=7">
 <!-- HyperFormula : moteur Sheets-compatible (~400 fonctions, FR) -->
 <script src="https://cdn.jsdelivr.net/npm/hyperformula/dist/hyperformula.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hyperformula/dist/languages/frFR.min.js"></script>
@@ -28,6 +28,7 @@
     <select id="tableSelect">
       <option value="">— chargement —</option>
     </select>
+    <button class="ts-trash" id="btnNewTable" title="Créer une nouvelle table" style="color:var(--green);">+</button>
     <button class="ts-trash" id="btnDropTable" title="Supprimer cette table">🗑</button>
   </div>
   <div class="header-actions">
@@ -184,6 +185,27 @@
   </div>
 </div>
 
+<div class="modal-overlay hidden" id="newTableModal">
+  <div class="modal" style="width:520px;max-width:95vw;">
+    <h3>➕ Nouvelle table PostgreSQL</h3>
+    <div class="form-group">
+      <label class="form-label">Nom de la table</label>
+      <input class="form-input" id="newTableName" placeholder="ex: ma_nouvelle_table">
+      <div class="form-hint">Snake_case minuscule. Pas de préfixe « _ ».</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Colonnes</label>
+      <div id="newTableColumns"></div>
+      <button class="tool-btn" id="btnAddTableColumn" style="margin-top:6px;">+ Ajouter une colonne</button>
+      <div class="form-hint">La <strong>1ʳᵉ colonne</strong> sera la clé primaire utilisée pour les UPDATE/DELETE.</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" data-close="newTableModal">Annuler</button>
+      <button class="btn btn-primary" id="btnCreateTable">Créer dans PostgreSQL</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay hidden" id="addRowModal">
   <div class="modal">
     <h3>➕ Nouvelle ligne</h3>
@@ -313,10 +335,18 @@
             <select class="form-select" id="scrTriggerType" style="width:auto;">
               <option value="manual">▶ Manuel</option>
               <option value="cron">⏱ Planifié (cron)</option>
+              <option value="on_edit">✏️ À chaque édition de cellule</option>
+              <option value="on_row_add">➕ À chaque ajout de ligne</option>
             </select>
-            <input class="form-input" id="scrCron" placeholder="0 8 * * * (tous les jours à 8h)" style="flex:1;max-width:260px;display:none;">
+            <input class="form-input" id="scrCron" placeholder="0 8 * * * (cron Europe/Paris)" style="flex:1;max-width:240px;display:none;">
+            <select class="form-select" id="scrTriggerTable" style="width:auto;display:none;">
+              <option value="">— toutes les tables —</option>
+            </select>
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);">
               <input type="checkbox" id="scrEnabled" checked> Activé
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);" title="Exécution via RestrictedPython (limite les builtins, bloque les imports dangereux)">
+              <input type="checkbox" id="scrSandboxed"> 🛡 Sandbox
             </label>
             <div style="margin-left:auto;display:flex;gap:6px;">
               <button class="btn btn-success" id="scrBtnRun">▶ Exécuter</button>
@@ -393,6 +423,37 @@ mhp.log(f"{len(rows)} lignes importées")
     </div>
 
     <div class="help-block">
+      <div class="help-title">⏱ Triggers automatiques</div>
+      <pre class="lib-example">▶ Manuel       — déclenché par le bouton ▶
+⏱ Cron         — déclenché à des horaires (ex: '0 8 * * *' = 8h tous les jours)
+                 timezone Europe/Paris
+✏️ on_edit     — déclenché à chaque modification de cellule
+                 contexte fourni via os.environ :
+                   MHP_TRIGGER_TABLE, MHP_TRIGGER_COLUMN,
+                   MHP_TRIGGER_PRIMARY_VAL, MHP_TRIGGER_OLD_VALUE,
+                   MHP_TRIGGER_NEW_VALUE
+➕ on_row_add  — déclenché après un INSERT
+                 contexte : MHP_TRIGGER_TABLE, MHP_TRIGGER_PRIMARY_VAL,
+                   MHP_TRIGGER_ROW_DATA (JSON)
+
+Exemple on_edit :
+  import os, mhp
+  if os.environ['MHP_TRIGGER_COLUMN'] == 'client':
+      mhp.log(f"Client modifié : {os.environ['MHP_TRIGGER_OLD_VALUE']}"
+              f" → {os.environ['MHP_TRIGGER_NEW_VALUE']}")</pre>
+    </div>
+
+    <div class="help-block">
+      <div class="help-title">🛡 Sandbox (RestrictedPython)</div>
+      <p style="font-size:12px;color:var(--text2);line-height:1.6;">
+        Quand activé : le code est compilé via RestrictedPython, qui bloque
+        les imports dangereux (<code>os.system</code>, <code>subprocess</code>, <code>eval</code>, etc.).
+        À utiliser pour les scripts écrits par des utilisateurs moins fiables.
+        <br><br>Inconvénient : limite les librairies utilisables. La lib <code>mhp</code> reste disponible.
+      </p>
+    </div>
+
+    <div class="help-block">
       <div class="help-title">⚙️ Limites</div>
       <ul style="font-size:12px;color:var(--text2);line-height:1.7;padding-left:20px;">
         <li>Timeout : <strong>60 secondes</strong> par exécution</li>
@@ -411,7 +472,7 @@ mhp.log(f"{len(rows)} lignes importées")
 <!-- ───── Autocomplete dropdown (positionné dynamiquement) ───── -->
 <div id="acDropdown" class="ac-dropdown hidden"></div>
 
-<script src="formulas.js?v=6"></script>
-<script src="app.js?v=6"></script>
+<script src="formulas.js?v=7"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>
