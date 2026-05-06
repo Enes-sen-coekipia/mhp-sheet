@@ -155,7 +155,7 @@ body {
 
 table { border-collapse: separate; border-spacing: 0; font-family: 'DM Mono', monospace; font-size: 12px; min-width: 100%; }
 thead th {
-  height: 26px;
+  height: 38px;
   background: var(--surface);
   border-right: 1px solid var(--border);
   border-bottom: 2px solid var(--border);
@@ -167,16 +167,21 @@ thead th {
   top: 0;
   z-index: 10;
   white-space: nowrap;
-  padding: 0 10px;
+  padding: 3px 10px 4px;
   cursor: pointer;
   transition: background 0.1s, color 0.1s;
   min-width: var(--col-w);
   font-family: 'DM Sans', sans-serif;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  vertical-align: top;
 }
 thead th:first-child { width: var(--idx-w); min-width: var(--idx-w); left: 0; z-index: 20; cursor: default; text-align: center; padding: 0; }
 thead th:hover:not(:first-child) { background: var(--surface2); color: var(--text); }
+thead th .th-letter { font-size: 9px; color: var(--text3); font-family: 'DM Mono', monospace; opacity: 0.5; text-transform: none; letter-spacing: 0.05em; line-height: 1; margin-bottom: 3px; font-weight: 500; }
+thead th .th-name { font-size: 11px; line-height: 1.2; }
+thead th:hover .th-letter { opacity: 1; color: var(--accent); }
+thead th.sorted .th-letter, thead th.filtered .th-letter { opacity: 0.85; color: var(--accent); }
 thead th.formula-header { color: #60a5fa; }
 thead th.add-col { width: 44px; min-width: 44px; text-align: center; font-size: 16px; color: var(--text3); padding: 0; }
 thead th.add-col:hover { background: var(--surface2); color: var(--green); }

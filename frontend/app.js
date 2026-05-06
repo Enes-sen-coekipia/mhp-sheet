@@ -67,22 +67,54 @@ function toHFValue(raw) {
   return s;
 }
 
+function _detectFrenchLangPack() {
+  // Le UMD du pack frFR de HyperFormula peut s'attacher à différents endroits
+  // selon la version. On essaie tous les emplacements connus.
+  if (typeof HyperFormula !== 'undefined') {
+    if (HyperFormula.languages && HyperFormula.languages.frFR) return HyperFormula.languages.frFR;
+  }
+  if (typeof HyperFormulaLanguages !== 'undefined' && HyperFormulaLanguages.frFR) return HyperFormulaLanguages.frFR;
+  if (typeof window !== 'undefined' && window.frFR && window.frFR.functions) return window.frFR;
+  return null;
+}
+
+let _frRegistered = false;
 function rebuildHF() {
   if (typeof HyperFormula === 'undefined') {
     hfReady = false;
     return;
   }
   if (hf) { try { hf.destroy(); } catch {} hf = null; }
-  try {
-    if (typeof HyperFormulaLanguages !== 'undefined' && HyperFormulaLanguages.frFR) {
-      try { HyperFormula.registerLanguage('frFR', HyperFormulaLanguages.frFR); } catch {}
+
+  // Enregistre le pack FR (une seule fois)
+  let useFr = false;
+  if (!_frRegistered) {
+    const frPack = _detectFrenchLangPack();
+    if (frPack) {
+      try {
+        HyperFormula.registerLanguage('frFR', frPack);
+        _frRegistered = true;
+        useFr = true;
+        console.log('✓ HyperFormula : pack français registered (SOMME, MOYENNE, SI, RECHERCHEV…)');
+      } catch (e) {
+        console.warn('Pack frFR déjà enregistré ou erreur :', e.message);
+        _frRegistered = true;
+        useFr = true;
+      }
+    } else {
+      console.warn('⚠️ Pack frFR HyperFormula non trouvé — fonctions en anglais (SUM, AVERAGE, IF, VLOOKUP)');
     }
+  } else {
+    useFr = true;
+  }
+
+  try {
     const data2d = state.rows.map((row) =>
       state.colNames.map((col) => toHFValue(row[col]))
     );
     hf = HyperFormula.buildFromArray(data2d, {
       licenseKey: 'gpl-v3',
-      language: (typeof HyperFormulaLanguages !== 'undefined' && HyperFormulaLanguages.frFR) ? 'frFR' : 'enGB',
+      language: useFr ? 'frFR' : 'enGB',
     });
     // Plages nommées : =SOMME(palettes_entree) plutôt que =SOMME(B:B)
     state.colNames.forEach((col, ci) => {
@@ -163,17 +195,57 @@ function buildSuggestions(token) {
   if (!t) return [];
   const upper = t.toUpperCase();
   const lower = t.toLowerCase();
+
+  // Fonctions (recherche FR + EN)
   const fnMatches = FORMULAS
     .filter((f) => f.name.startsWith(upper) || f.en.startsWith(upper))
-    .slice(0, 10)
-    .map((f) => ({ kind: 'fn', ...f }));
-  const colMatches = state.colNames
-    .filter((c) => c.toLowerCase().startsWith(lower) && c.toLowerCase() !== lower)
     .slice(0, 8)
-    .map((c) => ({ kind: 'col', name: c, type_pg: state.colTypes[c] || 'text' }));
-  // Si la 1re lettre est upper-case → favorise fonctions, sinon colonnes
-  const isUpper = t[0] === t[0].toUpperCase() && /[A-Z]/.test(t[0]);
-  return isUpper ? [...fnMatches, ...colMatches] : [...colMatches, ...fnMatches];
+    .map((f) => ({ kind: 'fn', ...f }));
+
+  // Colonnes : match par LETTRE (B, AA…) OU par NOM (nb_…)
+  const colMatches = [];
+  state.colNames.forEach((col, ci) => {
+    const letter = colLetter(ci);
+    const matchedByLetter = letter.startsWith(upper);
+    const matchedByName = col.toLowerCase().startsWith(lower);
+    if (!matchedByLetter && !matchedByName) return;
+    // Insertion : si l'utilisateur tapait des lettres (B, AA…) → insère 'B1' (ref de cellule)
+    //             sinon (a tapé le début du nom) → insère le nom (named range)
+    const insertText = matchedByLetter && !matchedByName ? `${letter}1` : col;
+    colMatches.push({
+      kind: 'col',
+      name: col,
+      letter: letter,
+      type_pg: state.colTypes[col] || 'text',
+      matchedBy: matchedByLetter && !matchedByName ? 'letter' : 'name',
+      insertText: insertText,
+    });
+  });
+
+  // Cas spécial : si l'utilisateur tape juste 1 lettre (B, AA), proposer aussi B:B (colonne entière)
+  if (/^[A-Z]+$/i.test(t)) {
+    state.colNames.forEach((col, ci) => {
+      const letter = colLetter(ci);
+      if (letter.startsWith(upper)) {
+        colMatches.push({
+          kind: 'col',
+          name: col,
+          letter: letter,
+          type_pg: state.colTypes[col] || 'text',
+          matchedBy: 'range',
+          insertText: `${letter}:${letter}`,
+          rangeNote: 'colonne entière',
+        });
+      }
+    });
+  }
+
+  // Ordre : si lettre majuscule en 1er → fonctions+lettre prioritaire, sinon colonnes par nom
+  const isUpperFirst = t[0] === t[0].toUpperCase() && /[A-Z]/.test(t[0]);
+  if (isUpperFirst) {
+    return [...fnMatches, ...colMatches.slice(0, 10)];
+  }
+  return [...colMatches.slice(0, 10), ...fnMatches.slice(0, 6)];
 }
 
 function attachAutocomplete(input) {
@@ -238,12 +310,16 @@ function acRender() {
           <span class="ac-desc">${escapeHTML(it.short)}</span>
         </div>`;
     }
+    // Colonne : affiche "B · nb_transports_crees"
+    const isRange = it.matchedBy === 'range';
+    const labelLetter = isRange ? `${it.letter}:${it.letter}` : it.letter;
+    const desc = isRange ? `colonne ${it.letter} entière (${it.name})` : `${it.name}`;
     return `
       <div class="ac-item ${active}" data-idx="${i}">
-        <span class="ac-icon ac-col">▦</span>
-        <span class="ac-name">${escapeHTML(it.name)}</span>
+        <span class="ac-icon ac-col">${isRange ? '▥' : '▦'}</span>
+        <span class="ac-name"><strong>${escapeHTML(labelLetter)}</strong> · ${escapeHTML(it.name)}</span>
         <span class="ac-sig">${escapeHTML(it.type_pg)}</span>
-        <span class="ac-desc">colonne</span>
+        <span class="ac-desc">${escapeHTML(desc)}</span>
       </div>`;
   }).join('') + `
     <div class="ac-foot">
@@ -313,7 +389,9 @@ function acApply(idx) {
     insertion = it.name + '(';
     cursorOffset = insertion.length;
   } else {
-    insertion = it.name;
+    // Pour les colonnes : insertText calculé côté buildSuggestions
+    // (B1 si match par lettre, nom si match par nom, B:B si range)
+    insertion = it.insertText || it.name;
     cursorOffset = insertion.length;
   }
   ac.input.value = before + insertion + after;
@@ -656,17 +734,20 @@ function renderTable() {
 
   state.colNames.forEach((col, ci) => {
     const th = document.createElement('th');
+    const letter = colLetter(ci);
     const hasSqlFormula = !!state.formulas[col];
     const sorted = state.sort && state.sort.ci === ci;
     const filtered = !!state.filters[ci];
     if (hasSqlFormula) th.classList.add('formula-header');
     if (sorted) th.classList.add('sorted');
     if (filtered) th.classList.add('filtered');
-    th.innerHTML = (hasSqlFormula ? '⚡ ' : '')
-      + escapeHTML(col)
-      + (sorted ? `<span class="h-icon sort">${state.sort.dir === 'asc' ? '↑' : '↓'}</span>` : '')
-      + (filtered ? '<span class="h-icon filter">🔍</span>' : '');
-    th.title = col + (hasSqlFormula ? '\n= ' + state.formulas[col] : '') + '\n' + (state.colTypes[col] || '') + '\n\nClic : trier / filtrer';
+    const sortIcon = sorted ? `<span class="h-icon sort">${state.sort.dir === 'asc' ? '↑' : '↓'}</span>` : '';
+    const filterIcon = filtered ? '<span class="h-icon filter">🔍</span>' : '';
+    th.innerHTML = `
+      <div class="th-letter">${letter}</div>
+      <div class="th-name">${(hasSqlFormula ? '⚡ ' : '') + escapeHTML(col) + sortIcon + filterIcon}</div>
+    `;
+    th.title = `${letter} · ${col}${hasSqlFormula ? '\n= ' + state.formulas[col] : ''}\n${state.colTypes[col] || ''}\n\nClic : trier / filtrer`;
     th.onclick = (e) => { e.stopPropagation(); openColumnMenu(ci, th); };
     hr.appendChild(th);
   });
