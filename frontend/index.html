@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MHP DataSheet</title>
-<link rel="stylesheet" href="styles.css?v=10">
+<link rel="stylesheet" href="styles.css?v=11">
 <!-- HyperFormula : moteur Sheets-compatible (~400 fonctions, FR) -->
 <script src="https://cdn.jsdelivr.net/npm/hyperformula/dist/hyperformula.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hyperformula/dist/languages/frFR.min.js"></script>
@@ -255,6 +255,19 @@
 <div class="modal-overlay hidden" id="helpModal">
   <div class="modal" style="width:560px;">
     <h3>💡 Les deux types de formules</h3>
+
+    <div class="help-block">
+      <div class="help-title">↘ Recopie automatique (comme Excel/Sheets)</div>
+      <div class="help-body">
+        Sélectionne une cellule (avec valeur ou formule), tu vois un <strong>petit carré bleu en bas à droite</strong>.
+        <ul style="padding-left:20px;margin-top:4px;">
+          <li><strong>Glisse</strong> ce carré vers le bas → la formule se recopie sur toutes les lignes survolées
+              (les références <code>F3</code>, <code>A1</code>… s'ajustent automatiquement à chaque ligne)</li>
+          <li><strong>Ctrl+D</strong> sur une cellule → recopie la valeur de la cellule au-dessus</li>
+          <li>Clic sur en-tête de colonne → <strong>📥 Recopier 1ʳᵉ ligne sur toute la colonne</strong> = applique la formule de la 1ʳᵉ ligne sur toutes les lignes en un clic</li>
+        </ul>
+      </div>
+    </div>
 
     <div class="help-block">
       <div class="help-title">📐 Formule cellule (type Google Sheets)</div>
@@ -585,7 +598,7 @@ Exemple on_edit :
 <!-- ───── Autocomplete dropdown (positionné dynamiquement) ───── -->
 <div id="acDropdown" class="ac-dropdown hidden"></div>
 
-<script src="formulas.js?v=10"></script>
-<script src="app.js?v=10"></script>
+<script src="formulas.js?v=11"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>

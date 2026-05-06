@@ -753,8 +753,12 @@ function renderTable() {
 function selectCell(ri, ci, td) {
   if (state.editingCell) stopEdit(true);
   document.querySelectorAll('.cell.selected').forEach((c) => c.classList.remove('selected'));
+  document.querySelectorAll('.cell-fill-handle').forEach((h) => h.remove());
   td.classList.add('selected');
   state.selectedCell = { ri, ci, td };
+  // Poignée de recopie (sauf sur colonnes calculées par formule SQL)
+  const colName = state.colNames[ci];
+  if (!state.formulas[colName]) attachFillHandle(td, ri, ci);
 
   const col = state.colNames[ci];
   const row = state.rows[ri];
@@ -1057,6 +1061,7 @@ function openColumnMenu(ci, anchorEl) {
       <button class="cm-item" data-act="select-col">📊 Voir stats colonne</button>
       <button class="cm-item" data-act="edit-formula">⚡ ${hasSql ? 'Modifier' : 'Ajouter'} formule SQL</button>
       ${hasSql ? '<button class="cm-item" data-act="recalc">🔄 Recalculer la colonne</button>' : ''}
+      ${!hasSql ? '<button class="cm-item" data-act="fill-from-first">📥 Recopier 1ʳᵉ ligne sur toute la colonne</button>' : ''}
     </div>
     <div class="cm-section">
       <button class="cm-item danger" data-act="drop-col">🗑 Supprimer cette colonne</button>
@@ -1103,6 +1108,7 @@ function handleColMenuAction(act, ci, anchorEl) {
     case 'select-col': closeColumnMenu(); selectColumn(ci); break;
     case 'edit-formula': closeColumnMenu(); state.selectedCell = { ri: -1, ci, td: null }; openFormulaModal(); break;
     case 'recalc': closeColumnMenu(); recalculateColumn(ci); break;
+    case 'fill-from-first': closeColumnMenu(); fillColumnFromFirst(ci); break;
     case 'drop-col': closeColumnMenu(); dropColumn(ci); break;
   }
 }
@@ -1866,6 +1872,137 @@ async function disconnectGoogle() {
 }
 
 // ============================================================
+//  FILL HANDLE — recopie style Excel/Sheets (drag down, Ctrl+D, etc.)
+// ============================================================
+const fill = { active: false, srcRi: -1, srcCi: -1, currentRi: -1 };
+
+function attachFillHandle(td, ri, ci) {
+  const handle = document.createElement('div');
+  handle.className = 'cell-fill-handle';
+  handle.title = 'Glisser pour recopier la formule/valeur sur les lignes voulues';
+  handle.addEventListener('mousedown', (e) => startFillDrag(e, ri, ci));
+  td.appendChild(handle);
+}
+
+function startFillDrag(e, srcRi, srcCi) {
+  e.preventDefault();
+  e.stopPropagation();
+  fill.active = true;
+  fill.srcRi = srcRi;
+  fill.srcCi = srcCi;
+  fill.currentRi = srcRi;
+  document.body.classList.add('fill-dragging');
+  document.addEventListener('mousemove', onFillMove);
+  document.addEventListener('mouseup', onFillEnd);
+}
+
+function onFillMove(e) {
+  if (!fill.active) return;
+  const target = document.elementFromPoint(e.clientX, e.clientY);
+  if (!target || !target.closest) return;
+  const td = target.closest('td.cell');
+  if (!td) return;
+  const ri = parseInt(td.dataset.row, 10);
+  const ci = parseInt(td.dataset.col, 10);
+  if (isNaN(ri) || ci !== fill.srcCi) return; // même colonne uniquement
+  if (ri === fill.currentRi) return;
+  fill.currentRi = ri;
+  highlightFillRange();
+}
+
+function highlightFillRange() {
+  document.querySelectorAll('td.cell.fill-preview').forEach((el) => el.classList.remove('fill-preview'));
+  const start = Math.min(fill.srcRi, fill.currentRi);
+  const end = Math.max(fill.srcRi, fill.currentRi);
+  for (let r = start; r <= end; r++) {
+    const td = document.querySelector(`td.cell[data-row="${r}"][data-col="${fill.srcCi}"]`);
+    if (td) td.classList.add('fill-preview');
+  }
+}
+
+function onFillEnd() {
+  document.body.classList.remove('fill-dragging');
+  document.removeEventListener('mousemove', onFillMove);
+  document.removeEventListener('mouseup', onFillEnd);
+  document.querySelectorAll('td.cell.fill-preview').forEach((el) => el.classList.remove('fill-preview'));
+  if (!fill.active) return;
+  const { srcRi, srcCi, currentRi } = fill;
+  fill.active = false;
+  if (srcRi === currentRi) return;
+  applyFillRange(srcRi, srcCi, currentRi);
+}
+
+function applyFillRange(srcRi, srcCi, endRi) {
+  const col = state.colNames[srcCi];
+  if (state.formulas[col]) {
+    toast('Colonne calculée par formule SQL — édition désactivée', 'orange');
+    return;
+  }
+  const srcValue = state.rows[srcRi] ? state.rows[srcRi][col] : '';
+  if (srcValue == null || srcValue === '') {
+    toast('Cellule source vide — rien à recopier', 'orange');
+    return;
+  }
+
+  const isFormula = String(srcValue).trim().startsWith('=');
+  const start = Math.min(srcRi, endRi);
+  const end = Math.max(srcRi, endRi);
+  let count = 0;
+
+  // Si formule : on demande à HyperFormula d'ajuster les références (relatives)
+  if (isFormula && hfReady) {
+    try { hf.copy({ sheet: 0, col: srcCi, row: srcRi, width: 1, height: 1 }); } catch {}
+  }
+
+  for (let r = start; r <= end; r++) {
+    if (r === srcRi) continue;
+    let newValue;
+    if (isFormula && hfReady) {
+      try {
+        hf.paste({ sheet: 0, col: srcCi, row: r });
+        const adjusted = hf.getCellFormula({ sheet: 0, col: srcCi, row: r });
+        newValue = adjusted || String(srcValue);
+      } catch (e) {
+        newValue = String(srcValue);
+        updateHFCell(r, srcCi, newValue);
+      }
+    } else {
+      newValue = String(srcValue);
+      updateHFCell(r, srcCi, newValue);
+    }
+
+    const prev = state.rows[r][col] ?? '';
+    if (String(prev) !== String(newValue)) {
+      if (prev !== '') recordUndo(r, srcCi, prev);
+      state.rows[r][col] = newValue;
+      const key = state.rowKeys[r];
+      state.pending.set(`${key}::${col}`, {
+        primary_val: key, column: col, value: newValue === '' ? null : newValue,
+      });
+      count++;
+    }
+  }
+
+  markModified();
+  renderTable();
+  toast(`✓ Recopié sur ${count} cellule(s) — Ctrl+S pour sauvegarder`, 'green');
+}
+
+// Ctrl+D : recopie depuis la cellule au-dessus
+function fillDownFromAbove() {
+  if (!state.selectedCell) return;
+  const { ri, ci } = state.selectedCell;
+  if (ri <= 0) { toast('Aucune cellule au-dessus', 'orange'); return; }
+  applyFillRange(ri - 1, ci, ri);
+}
+
+// Recopie la 1ère ligne de la colonne sur TOUTE la colonne (depuis le menu colonne)
+function fillColumnFromFirst(ci) {
+  if (state.rows.length < 2) { toast('Pas assez de lignes', 'orange'); return; }
+  applyFillRange(0, ci, state.rows.length - 1);
+}
+
+// ============================================================
 //  CREATE TABLE (modal "Nouvelle table")
 // ============================================================
 const COL_TYPES = ['TEXT', 'NUMERIC', 'INTEGER', 'BIGINT', 'DATE', 'TIMESTAMP', 'BOOLEAN', 'JSONB'];
@@ -2025,10 +2162,13 @@ function bindGlobalEvents() {
       e.preventDefault();
       openSearch();
     } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
-      // Ne pas undo si on est dans un input
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       e.preventDefault();
       undo();
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      e.preventDefault();
+      fillDownFromAbove();
     }
   });
 

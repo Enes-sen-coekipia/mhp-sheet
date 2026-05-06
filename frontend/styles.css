@@ -215,6 +215,30 @@ td.cell {
 }
 td.cell:hover { background: rgba(255,255,255,0.025); }
 td.cell.selected { background: rgba(79,124,255,0.12); outline: 2px solid var(--accent); outline-offset: -2px; z-index: 1; position: relative; }
+
+/* Poignée de recopie (fill handle) — comme Excel/Sheets */
+.cell-fill-handle {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+  border: 1.5px solid var(--bg);
+  border-radius: 1px;
+  cursor: crosshair;
+  z-index: 6;
+  transition: transform 0.1s;
+}
+.cell-fill-handle:hover { background: #fff; transform: scale(1.4); }
+body.fill-dragging { cursor: crosshair !important; user-select: none; }
+body.fill-dragging * { cursor: crosshair !important; }
+
+/* Cellules survolées pendant le drag de fill */
+td.cell.fill-preview {
+  background: rgba(79,124,255,0.18) !important;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
 td.cell.editing { padding: 0; overflow: visible; }
 td.cell input { width: 100%; height: 100%; background: var(--surface2); border: 2px solid var(--accent); color: var(--text); font-family: 'DM Mono', monospace; font-size: 12px; padding: 0 8px; outline: none; }
 td.cell.formula-col { color: #93c5fd; }      /* SQL-formula column */
