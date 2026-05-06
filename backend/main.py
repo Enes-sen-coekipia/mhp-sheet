@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from config import settings
 from db import close_pool, get_cursor, init_pool, ping
+from scripts import router as scripts_router
 from models import (
     CellsBatchUpdate,
     CellUpdate,
@@ -47,6 +48,8 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+app.include_router(scripts_router)
 
 if settings.cors_origins:
     app.add_middleware(
@@ -278,6 +281,73 @@ def add_column(table_name: str, col: NewColumn):
             cur.execute(f'UPDATE "{table}" SET "{safe_name}" = ({formula})')
 
     return {"created": safe_name, "type": col_type, "formula": formula}
+
+
+@app.delete("/table/{table_name}/column")
+def drop_column(table_name: str, column: str):
+    """Supprime une colonne. Détecte les formules SQL qui la référencent et les supprime aussi."""
+    import re
+    table = validate_table(table_name)
+    col = validate_column(table, column)
+
+    pattern = re.compile(r'\b' + re.escape(col) + r'\b', re.IGNORECASE)
+
+    with get_cursor(dict_cursor=True) as (cur, _conn):
+        cur.execute("SELECT table_name, column_name, formula FROM _mhp_formulas")
+        all_formulas = cur.fetchall()
+
+    affected = []
+    for row in all_formulas:
+        if row["table_name"] == table and row["column_name"] == col:
+            continue
+        if pattern.search(row["formula"] or ""):
+            affected.append(f'{row["table_name"]}.{row["column_name"]}')
+
+    with get_cursor() as (cur, _conn):
+        cur.execute(f'ALTER TABLE "{table}" DROP COLUMN IF EXISTS "{col}"')
+        cur.execute(
+            "DELETE FROM _mhp_formulas WHERE table_name = %s AND column_name = %s",
+            (table, col),
+        )
+        # Supprime aussi les formules dépendantes (cassées) pour éviter les #REF! silencieux
+        for fq in affected:
+            t_, c_ = fq.split(".", 1)
+            cur.execute(
+                "DELETE FROM _mhp_formulas WHERE table_name = %s AND column_name = %s",
+                (t_, c_),
+            )
+
+    return {"deleted_column": col, "broken_formulas_removed": affected}
+
+
+@app.delete("/table/{table_name}")
+def drop_table(table_name: str):
+    """Supprime une table entière. Détecte et nettoie les formules d'autres tables qui la référencent."""
+    import re
+    table = validate_table(table_name)
+
+    pattern = re.compile(r'\b' + re.escape(table) + r'\b', re.IGNORECASE)
+
+    with get_cursor(dict_cursor=True) as (cur, _conn):
+        cur.execute("SELECT table_name, column_name, formula FROM _mhp_formulas WHERE table_name != %s", (table,))
+        all_formulas = cur.fetchall()
+
+    affected = []
+    for row in all_formulas:
+        if pattern.search(row["formula"] or ""):
+            affected.append(f'{row["table_name"]}.{row["column_name"]}')
+
+    with get_cursor() as (cur, _conn):
+        cur.execute(f'DROP TABLE IF EXISTS "{table}" CASCADE')
+        cur.execute("DELETE FROM _mhp_formulas WHERE table_name = %s", (table,))
+        for fq in affected:
+            t_, c_ = fq.split(".", 1)
+            cur.execute(
+                "DELETE FROM _mhp_formulas WHERE table_name = %s AND column_name = %s",
+                (t_, c_),
+            )
+
+    return {"deleted_table": table, "broken_formulas_removed": affected}
 
 
 @app.post("/formula/apply")

@@ -4,10 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MHP DataSheet</title>
-<link rel="stylesheet" href="styles.css?v=5">
+<link rel="stylesheet" href="styles.css?v=6">
 <!-- HyperFormula : moteur Sheets-compatible (~400 fonctions, FR) -->
 <script src="https://cdn.jsdelivr.net/npm/hyperformula/dist/hyperformula.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hyperformula/dist/languages/frFR.min.js"></script>
+<!-- Monaco editor : pour le module Scripts (chargé à la demande via require) -->
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
 </head>
 <body>
 
@@ -26,6 +28,7 @@
     <select id="tableSelect">
       <option value="">— chargement —</option>
     </select>
+    <button class="ts-trash" id="btnDropTable" title="Supprimer cette table">🗑</button>
   </div>
   <div class="header-actions">
     <button class="btn btn-ghost icon-only-mobile" id="btnSearch" title="Rechercher (Ctrl+F)"><span class="btn-icon">🔍</span><span class="btn-text">Recherche</span></button>
@@ -35,6 +38,7 @@
     </div>
     <button class="btn btn-ghost icon-only-mobile" id="btnExport" title="Exporter en CSV (vue courante)"><span class="btn-icon">⬇</span><span class="btn-text">Export</span></button>
     <button class="btn btn-ghost icon-only-mobile" id="btnLib" title="Bibliothèque de formules"><span class="btn-icon">📚</span><span class="btn-text">Formules</span></button>
+    <button class="btn btn-ghost icon-only-mobile" id="btnScripts" title="Scripts (équivalent Apps Script)"><span class="btn-icon">📜</span><span class="btn-text">Scripts</span></button>
     <button class="btn btn-ghost icon-only-mobile" id="btnHelp" title="Aide formules">?</button>
     <button class="btn btn-ghost" id="btnAddCol"><span class="btn-icon">+</span><span class="btn-text">Colonne</span></button>
     <button class="btn btn-ghost" id="btnAddRow"><span class="btn-icon">+</span><span class="btn-text">Ligne</span></button>
@@ -286,10 +290,128 @@
   </div>
 </div>
 
+<!-- ───── Modal Scripts (équivalent Apps Script, plein écran) ───── -->
+<div class="modal-overlay hidden" id="scriptsModal">
+  <div class="modal scripts-modal">
+    <div class="scripts-header">
+      <h3 style="margin:0;">📜 Scripts <span style="color:var(--text3);font-size:12px;font-weight:400;">— exécution Python côté serveur</span></h3>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-ghost" id="scrBtnHelp" title="Aide / API mhp">?</button>
+        <button class="btn btn-ghost" data-close="scriptsModal">✕</button>
+      </div>
+    </div>
+    <div class="scripts-body">
+      <aside class="scripts-side">
+        <button class="btn btn-primary" id="scrBtnNew" style="width:100%;justify-content:center;margin-bottom:8px;">+ Nouveau script</button>
+        <div id="scrList" class="scr-list"></div>
+      </aside>
+      <section class="scripts-main">
+        <div id="scrPlaceholder" class="scripts-placeholder">Sélectionne ou crée un script à gauche</div>
+        <div id="scrEditorPane" class="scripts-editor-pane hidden">
+          <div class="scr-toolbar">
+            <input class="form-input" id="scrName" placeholder="Nom du script" style="flex:1;max-width:300px;">
+            <select class="form-select" id="scrTriggerType" style="width:auto;">
+              <option value="manual">▶ Manuel</option>
+              <option value="cron">⏱ Planifié (cron)</option>
+            </select>
+            <input class="form-input" id="scrCron" placeholder="0 8 * * * (tous les jours à 8h)" style="flex:1;max-width:260px;display:none;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);">
+              <input type="checkbox" id="scrEnabled" checked> Activé
+            </label>
+            <div style="margin-left:auto;display:flex;gap:6px;">
+              <button class="btn btn-success" id="scrBtnRun">▶ Exécuter</button>
+              <button class="btn btn-primary" id="scrBtnSave">💾 Sauvegarder</button>
+              <button class="btn btn-danger" id="scrBtnDel">🗑</button>
+            </div>
+          </div>
+          <div class="scr-editor" id="scrEditor"></div>
+          <div class="scr-output">
+            <div class="scr-output-tabs">
+              <button class="scr-tab active" data-tab="output">📤 Sortie</button>
+              <button class="scr-tab" data-tab="runs">🕒 Historique</button>
+            </div>
+            <div class="scr-output-content">
+              <pre id="scrOutput" class="scr-output-pre">— Aucune exécution —</pre>
+              <div id="scrRuns" class="scr-runs hidden"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<!-- ───── Modal Aide Scripts (API mhp) ───── -->
+<div class="modal-overlay hidden" id="scrHelpModal">
+  <div class="modal" style="width:680px;max-width:95vw;">
+    <h3>📖 API mhp — référence</h3>
+    <p class="form-hint" style="font-size:12.5px;">Tous les scripts commencent par <code>import mhp</code>. La lib est disponible automatiquement.</p>
+
+    <div class="help-block">
+      <div class="help-title">📊 Tables</div>
+      <pre class="lib-example">t = mhp.table('stock_it')
+t.columns                              # liste des colonnes
+t.rows(limit=100)                       # liste de dicts
+t.rows(where='client = %s', params=['BBA'])
+t.count(where="date LIKE '2025%'")
+t.append_row({'date':'2026-01-01', 'palettes_entree':'12'})
+t.append_rows([{...}, {...}, {...}])    # batch insert
+t.update_cell(primary_val='2026-01-01', column='client', value='ABC')
+t.delete_row(primary_val='2026-01-01')
+
+mhp.tables()                            # liste toutes les tables
+mhp.sql("SELECT date, COUNT(*) FROM stock_it GROUP BY date")</pre>
+    </div>
+
+    <div class="help-block">
+      <div class="help-title">🌐 HTTP</div>
+      <pre class="lib-example">r = mhp.http.get('https://api.example.com/data',
+                  headers={'Authorization': 'Bearer xxx'})
+r.status        # 200
+r.text          # texte brut
+r.json()        # parse JSON
+
+mhp.http.post('https://api.example.com', json={'foo':'bar'})
+mhp.http.put('...', json={...})
+mhp.http.delete('...')</pre>
+    </div>
+
+    <div class="help-block">
+      <div class="help-title">📧 Mail</div>
+      <pre class="lib-example">mhp.mail.send(to='admin@mhp.fr',
+              subject='Rapport',
+              body='texte brut',
+              html='&lt;b&gt;HTML&lt;/b&gt;')
+# Configurer MHP_SMTP_HOST/USER/PASSWORD dans .env</pre>
+    </div>
+
+    <div class="help-block">
+      <div class="help-title">📝 Logs</div>
+      <pre class="lib-example">mhp.log("Traitement OK")
+mhp.log(f"{len(rows)} lignes importées")
+# Visible dans l'onglet "Historique" après exécution</pre>
+    </div>
+
+    <div class="help-block">
+      <div class="help-title">⚙️ Limites</div>
+      <ul style="font-size:12px;color:var(--text2);line-height:1.7;padding-left:20px;">
+        <li>Timeout : <strong>60 secondes</strong> par exécution</li>
+        <li>Sortie capturée : 100 000 caractères max</li>
+        <li>Le script tourne avec les droits de la BD : peut tout lire/écrire</li>
+        <li>Bibliothèques : tout ce qui est dans le venv backend (psycopg2 inclus)</li>
+      </ul>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-primary" data-close="scrHelpModal">OK</button>
+    </div>
+  </div>
+</div>
+
 <!-- ───── Autocomplete dropdown (positionné dynamiquement) ───── -->
 <div id="acDropdown" class="ac-dropdown hidden"></div>
 
-<script src="formulas.js?v=5"></script>
-<script src="app.js?v=5"></script>
+<script src="formulas.js?v=6"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>

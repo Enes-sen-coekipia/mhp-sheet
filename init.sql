@@ -26,6 +26,33 @@ CREATE TABLE IF NOT EXISTS _mhp_formulas (
     PRIMARY KEY (table_name, column_name)
 );
 
+-- ─── Module Scripts (équivalent Apps Script, langage Python) ───
+CREATE TABLE IF NOT EXISTS _mhp_scripts (
+    id            SERIAL PRIMARY KEY,
+    name          TEXT NOT NULL UNIQUE,
+    description   TEXT,
+    language      TEXT NOT NULL DEFAULT 'python',
+    code          TEXT NOT NULL DEFAULT '',
+    trigger_type  TEXT NOT NULL DEFAULT 'manual',  -- 'manual' | 'cron'
+    trigger_cron  TEXT,                            -- ex: '0 8 * * *'
+    enabled       BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS _mhp_script_runs (
+    id            SERIAL PRIMARY KEY,
+    script_id     INTEGER REFERENCES _mhp_scripts(id) ON DELETE CASCADE,
+    started_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+    ended_at      TIMESTAMP,
+    status        TEXT NOT NULL DEFAULT 'running',  -- 'running' | 'success' | 'error' | 'timeout'
+    output        TEXT,
+    error         TEXT,
+    triggered_by  TEXT NOT NULL DEFAULT 'manual',
+    duration_ms   INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_script_runs_script ON _mhp_script_runs(script_id, started_at DESC);
+
 -- ─── Indexes pour accélérer les RECHERCHEV-via-SQL et filtres usuels ───
 -- À jouer manuellement sur une BD existante :
 --   docker exec -i mhp_postgres psql -U mhp_user -d pilotage_mhp < init.sql

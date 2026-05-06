@@ -1058,6 +1058,9 @@ function openColumnMenu(ci, anchorEl) {
       <button class="cm-item" data-act="edit-formula">⚡ ${hasSql ? 'Modifier' : 'Ajouter'} formule SQL</button>
       ${hasSql ? '<button class="cm-item" data-act="recalc">🔄 Recalculer la colonne</button>' : ''}
     </div>
+    <div class="cm-section">
+      <button class="cm-item danger" data-act="drop-col">🗑 Supprimer cette colonne</button>
+    </div>
   `;
   // Position
   menu.classList.remove('hidden');
@@ -1100,6 +1103,43 @@ function handleColMenuAction(act, ci, anchorEl) {
     case 'select-col': closeColumnMenu(); selectColumn(ci); break;
     case 'edit-formula': closeColumnMenu(); state.selectedCell = { ri: -1, ci, td: null }; openFormulaModal(); break;
     case 'recalc': closeColumnMenu(); recalculateColumn(ci); break;
+    case 'drop-col': closeColumnMenu(); dropColumn(ci); break;
+  }
+}
+
+async function dropColumn(ci) {
+  const col = state.colNames[ci];
+  if (!confirm(`Supprimer définitivement la colonne "${col}" de la table "${state.table}" ?\n\nLes formules SQL qui la référencent (autres colonnes/tables) seront aussi supprimées.\n\nCette action est IRRÉVERSIBLE.`)) return;
+  try {
+    const r = await api(`/table/${encodeURIComponent(state.table)}/column?column=${encodeURIComponent(col)}`, { method: 'DELETE' });
+    let msg = `✓ Colonne "${col}" supprimée`;
+    if (r.broken_formulas_removed && r.broken_formulas_removed.length > 0) {
+      msg += ` (formules cassées nettoyées : ${r.broken_formulas_removed.join(', ')})`;
+    }
+    toast(msg, 'green');
+    await loadTable(state.table, { resetOffset: false });
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'red');
+  }
+}
+
+async function dropTable() {
+  if (!state.table) return;
+  const name = state.table;
+  if (!confirm(`Supprimer définitivement la TABLE ENTIÈRE "${name}" et toutes ses données ?\n\nLes formules SQL d'autres tables qui la référencent seront aussi supprimées.\n\nCette action est IRRÉVERSIBLE.`)) return;
+  // Double confirmation pour les tables
+  const typed = prompt(`Pour confirmer, retape exactement le nom de la table : ${name}`);
+  if (typed !== name) { toast('Suppression annulée', 'orange'); return; }
+  try {
+    const r = await api(`/table/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    let msg = `✓ Table "${name}" supprimée`;
+    if (r.broken_formulas_removed && r.broken_formulas_removed.length > 0) {
+      msg += ` (formules cassées nettoyées : ${r.broken_formulas_removed.join(', ')})`;
+    }
+    toast(msg, 'green');
+    await loadTables(); // recharge la liste des tables
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'red');
   }
 }
 
@@ -1439,6 +1479,245 @@ async function recalculateColumn(ci) {
 }
 
 // ============================================================
+//  MODULE SCRIPTS (équivalent Apps Script — Python sandbox)
+// ============================================================
+const scr = {
+  list: [],
+  current: null,         // script en cours d'édition
+  editor: null,          // instance Monaco
+  monacoLoading: false,
+  outputTab: 'output',
+};
+
+const SCR_TEMPLATE = `# Script Python — bibliothèque mhp disponible automatiquement
+import mhp
+
+mhp.log("Démarrage")
+
+# Exemple : compter les lignes de stock_it
+t = mhp.table('stock_it')
+mhp.log(f"Lignes : {t.count()}")
+
+# Exemple HTTP
+# r = mhp.http.get('https://api.example.com/data',
+#                  headers={'Authorization': 'Bearer xxx'})
+# data = r.json()
+# mhp.log(f"Reçu : {len(data)} éléments")
+
+mhp.log("Terminé")
+`;
+
+async function openScriptsModal() {
+  $('scriptsModal').classList.remove('hidden');
+  await loadMonaco();
+  await refreshScriptsList();
+}
+
+function closeScriptsModal() {
+  $('scriptsModal').classList.add('hidden');
+}
+
+function loadMonaco() {
+  return new Promise((resolve) => {
+    if (scr.monacoLoading) {
+      // Attend que le précédent chargement finisse
+      const wait = setInterval(() => {
+        if (scr.editor || !scr.monacoLoading) { clearInterval(wait); resolve(); }
+      }, 50);
+      return;
+    }
+    if (scr.editor) return resolve();
+    if (typeof require === 'undefined') { console.warn('Monaco loader pas chargé'); return resolve(); }
+    scr.monacoLoading = true;
+    require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' } });
+    require(['vs/editor/editor.main'], function () {
+      scr.editor = monaco.editor.create($('scrEditor'), {
+        value: '',
+        language: 'python',
+        theme: 'vs-dark',
+        fontSize: 13,
+        automaticLayout: true,
+        minimap: { enabled: false },
+        scrollBeyondLastLine: false,
+        renderWhitespace: 'selection',
+        tabSize: 4,
+        insertSpaces: true,
+      });
+      scr.monacoLoading = false;
+      resolve();
+    });
+  });
+}
+
+async function refreshScriptsList() {
+  try {
+    const d = await api('/scripts');
+    scr.list = d.scripts;
+    renderScriptsList();
+  } catch (e) {
+    toast('Erreur chargement scripts : ' + e.message, 'red');
+  }
+}
+
+function renderScriptsList() {
+  const el = $('scrList');
+  if (scr.list.length === 0) {
+    el.innerHTML = '<div style="text-align:center;color:var(--text3);font-size:12px;padding:20px;">Aucun script</div>';
+    return;
+  }
+  el.innerHTML = scr.list.map((s) => {
+    const trig = s.trigger_type === 'cron' ? `⏱ ${s.trigger_cron || '?'}` : '▶ Manuel';
+    const cls = (scr.current && scr.current.id === s.id) ? 'active' : '';
+    return `<div class="scr-item ${cls} ${s.enabled ? '' : 'scr-disabled'}" data-id="${s.id}">
+      <span class="scr-name">${escapeHTML(s.name)}</span>
+      <span class="scr-trig" title="${escapeHTML(trig)}">${escapeHTML(s.trigger_type === 'cron' ? '⏱' : '▶')}</span>
+    </div>`;
+  }).join('');
+  el.querySelectorAll('.scr-item').forEach((it) => {
+    it.addEventListener('click', () => loadScript(parseInt(it.dataset.id, 10)));
+  });
+}
+
+async function loadScript(id) {
+  try {
+    const s = await api(`/scripts/${id}`);
+    scr.current = s;
+    $('scrPlaceholder').classList.add('hidden');
+    $('scrEditorPane').classList.remove('hidden');
+    $('scrName').value = s.name;
+    $('scrTriggerType').value = s.trigger_type;
+    $('scrCron').value = s.trigger_cron || '';
+    $('scrCron').style.display = s.trigger_type === 'cron' ? '' : 'none';
+    $('scrEnabled').checked = !!s.enabled;
+    if (scr.editor) scr.editor.setValue(s.code || '');
+    $('scrOutput').textContent = '— Pas d\'exécution depuis le chargement —';
+    $('scrOutput').classList.remove('error');
+    renderScriptsList();
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'red');
+  }
+}
+
+function newScript() {
+  const name = prompt('Nom du nouveau script :');
+  if (!name || !name.trim()) return;
+  api('/scripts', {
+    method: 'POST',
+    body: JSON.stringify({ name: name.trim(), code: SCR_TEMPLATE, trigger_type: 'manual', enabled: true }),
+  }).then(async (s) => {
+    await refreshScriptsList();
+    loadScript(s.id);
+    toast(`✓ Script "${name}" créé`, 'green');
+  }).catch((e) => toast('Erreur : ' + e.message, 'red'));
+}
+
+async function saveScript() {
+  if (!scr.current) return;
+  const payload = {
+    name: $('scrName').value.trim(),
+    code: scr.editor ? scr.editor.getValue() : '',
+    trigger_type: $('scrTriggerType').value,
+    trigger_cron: $('scrCron').value.trim() || null,
+    enabled: $('scrEnabled').checked,
+  };
+  try {
+    await api(`/scripts/${scr.current.id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    toast('✓ Script sauvegardé', 'green');
+    await refreshScriptsList();
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'red');
+  }
+}
+
+async function runScript() {
+  if (!scr.current) return;
+  // Auto-save avant exécution pour ne pas perdre le code modifié
+  await saveScript();
+  $('scrOutput').textContent = '⏳ Exécution en cours...';
+  $('scrOutput').classList.remove('error');
+  try {
+    const r = await api(`/scripts/${scr.current.id}/run`, { method: 'POST' });
+    let txt = r.output || '(aucune sortie)';
+    if (r.status !== 'success') {
+      txt += '\n\n--- ERREUR ---\n' + (r.error || '(pas de message)');
+      $('scrOutput').classList.add('error');
+    } else {
+      $('scrOutput').classList.remove('error');
+    }
+    txt += `\n\n[${r.status} en ${r.duration_ms}ms]`;
+    $('scrOutput').textContent = txt;
+    if (scr.outputTab === 'runs') refreshRuns();
+  } catch (e) {
+    $('scrOutput').textContent = 'Erreur appel : ' + e.message;
+    $('scrOutput').classList.add('error');
+  }
+}
+
+async function deleteCurrentScript() {
+  if (!scr.current) return;
+  if (!confirm(`Supprimer le script "${scr.current.name}" ?`)) return;
+  try {
+    await api(`/scripts/${scr.current.id}`, { method: 'DELETE' });
+    toast('Script supprimé', 'green');
+    scr.current = null;
+    $('scrEditorPane').classList.add('hidden');
+    $('scrPlaceholder').classList.remove('hidden');
+    await refreshScriptsList();
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'red');
+  }
+}
+
+async function refreshRuns() {
+  if (!scr.current) return;
+  try {
+    const d = await api(`/scripts/${scr.current.id}/runs?limit=20`);
+    const el = $('scrRuns');
+    if (d.runs.length === 0) {
+      el.innerHTML = '<div style="text-align:center;color:var(--text3);font-size:12px;padding:20px;">Aucune exécution</div>';
+      return;
+    }
+    el.innerHTML = d.runs.map((r) => {
+      const dur = r.duration_ms != null ? `${r.duration_ms}ms` : '—';
+      const time = r.started_at ? new Date(r.started_at).toLocaleString('fr-FR') : '?';
+      return `<div class="scr-run" data-id="${r.id}">
+        <span class="scr-run-status ${escapeHTML(r.status)}">${escapeHTML(r.status)}</span>
+        <span class="scr-run-time">${escapeHTML(time)}</span>
+        <span class="scr-run-dur">${escapeHTML(dur)}</span>
+      </div>`;
+    }).join('');
+    el.querySelectorAll('.scr-run').forEach((it) => {
+      it.addEventListener('click', () => loadRun(parseInt(it.dataset.id, 10)));
+    });
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'red');
+  }
+}
+
+async function loadRun(runId) {
+  if (!scr.current) return;
+  try {
+    const r = await api(`/scripts/${scr.current.id}/runs/${runId}`);
+    let txt = r.output || '(aucune sortie)';
+    if (r.error) txt += '\n\n--- ERREUR ---\n' + r.error;
+    txt += `\n\n[${r.status} en ${r.duration_ms || 0}ms — ${new Date(r.started_at).toLocaleString('fr-FR')}]`;
+    setScriptTab('output');
+    $('scrOutput').textContent = txt;
+    $('scrOutput').classList.toggle('error', r.status !== 'success');
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'red');
+  }
+}
+
+function setScriptTab(tab) {
+  scr.outputTab = tab;
+  document.querySelectorAll('.scr-tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
+  $('scrOutput').classList.toggle('hidden', tab !== 'output');
+  $('scrRuns').classList.toggle('hidden', tab !== 'runs');
+  if (tab === 'runs') refreshRuns();
+}
+
+// ============================================================
 //  Utils
 // ============================================================
 function closeModal(id) { $(id).classList.add('hidden'); }
@@ -1470,8 +1749,21 @@ function bindGlobalEvents() {
   $('btnAddRow').addEventListener('click', openAddRowModal);
   $('saveBtn').addEventListener('click', saveAllChanges);
   $('btnRefresh').addEventListener('click', () => loadTable(state.table, { resetOffset: false }));
+  $('btnDropTable').addEventListener('click', dropTable);
   $('btnHelp').addEventListener('click', () => $('helpModal').classList.remove('hidden'));
   $('btnLib').addEventListener('click', openLibModal);
+  $('btnScripts').addEventListener('click', openScriptsModal);
+  $('scrBtnNew').addEventListener('click', newScript);
+  $('scrBtnSave').addEventListener('click', saveScript);
+  $('scrBtnRun').addEventListener('click', runScript);
+  $('scrBtnDel').addEventListener('click', deleteCurrentScript);
+  $('scrBtnHelp').addEventListener('click', () => $('scrHelpModal').classList.remove('hidden'));
+  $('scrTriggerType').addEventListener('change', (e) => {
+    $('scrCron').style.display = e.target.value === 'cron' ? '' : 'none';
+  });
+  document.querySelectorAll('.scr-tab').forEach((t) =>
+    t.addEventListener('click', () => setScriptTab(t.dataset.tab))
+  );
   $('libSearch').addEventListener('input', (e) => { lib.search = e.target.value; libRenderList(); });
   $('btnSearch').addEventListener('click', openSearch);
   $('btnExport').addEventListener('click', exportCSV);

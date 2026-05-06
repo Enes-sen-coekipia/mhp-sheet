@@ -93,6 +93,32 @@ CREATE INDEX IF NOT EXISTS idx_suivi_equipe_code           ON suivi_equipe(code)
 CREATE INDEX IF NOT EXISTS idx_recap_bl_n__bl              ON recap_bl(n__bl);
 CREATE INDEX IF NOT EXISTS idx_recap_bl_client             ON recap_bl(client);
 CREATE INDEX IF NOT EXISTS idx_recap_bl_date               ON recap_bl(date);
+
+-- Module Scripts (équivalent Apps Script)
+CREATE TABLE IF NOT EXISTS _mhp_scripts (
+    id            SERIAL PRIMARY KEY,
+    name          TEXT NOT NULL UNIQUE,
+    description   TEXT,
+    language      TEXT NOT NULL DEFAULT 'python',
+    code          TEXT NOT NULL DEFAULT '',
+    trigger_type  TEXT NOT NULL DEFAULT 'manual',
+    trigger_cron  TEXT,
+    enabled       BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS _mhp_script_runs (
+    id            SERIAL PRIMARY KEY,
+    script_id     INTEGER REFERENCES _mhp_scripts(id) ON DELETE CASCADE,
+    started_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+    ended_at      TIMESTAMP,
+    status        TEXT NOT NULL DEFAULT 'running',
+    output        TEXT,
+    error         TEXT,
+    triggered_by  TEXT NOT NULL DEFAULT 'manual',
+    duration_ms   INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_script_runs_script ON _mhp_script_runs(script_id, started_at DESC);
 ```
 
 100% non-destructif (`CREATE OR REPLACE` / `IF NOT EXISTS`). Aucun risque pour les données existantes.
