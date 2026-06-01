@@ -480,11 +480,23 @@ def run_script(name_or_id, body=None, timeout=120):
 
 # Exposition env vars utiles pour les scripts invoqués via /invoke ou par un autre script
 def get_invoke_body():
-    """Récupère le body JSON passé à un script via /invoke (ou run_script(...,body=...)).
+    """Récupère le body JSON passé à un script.
 
-    Renvoie None si pas de body, dict si JSON valide, str sinon.
+    Cherche dans cet ordre :
+    - MHP_INVOKE_BODY (déclenchement via /invoke ou mhp.run_script(body=...))
+    - MHP_WEBHOOK_BODY_JSON (déclenchement on_webhook)
+    - MHP_WEBHOOK_BODY_RAW (fallback texte brut si webhook non-JSON)
+    - MHP_TRIGGER_ROW_DATA (déclenchement on_row_add)
+
+    Renvoie None si rien, dict si JSON valide, str sinon.
     """
-    raw = os.environ.get("MHP_INVOKE_BODY", "")
+    raw = (
+        os.environ.get("MHP_INVOKE_BODY")
+        or os.environ.get("MHP_WEBHOOK_BODY_JSON")
+        or os.environ.get("MHP_TRIGGER_ROW_DATA")
+        or os.environ.get("MHP_WEBHOOK_BODY_RAW")
+        or ""
+    )
     if not raw:
         return None
     try:

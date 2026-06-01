@@ -80,58 +80,51 @@ test.describe('MHP DataSheet — smoke E2E', () => {
     await expect(page.locator('#addColModal')).toBeVisible();
     await page.fill('#newColName', TEST_COL);
     await page.selectOption('#newColType', 'TEXT');
-    // S'assurer pas de formule SQL
     await page.fill('#newColFormula', '');
-    // Création + attente refresh
     const respCreate = page.waitForResponse((r) => r.url().includes('/api/table/') && r.url().includes('/column') && r.request().method() === 'POST');
     await page.click('#btnCreateColumn');
     await respCreate;
-    // Le refresh recharge la table — attendre que la colonne apparaisse en header
     await page.waitForFunction(
       (col) => Array.from(document.querySelectorAll('th .th-name')).some((el) => el.textContent.includes(col)),
       TEST_COL,
       { timeout: 10_000 }
     );
 
-    // Récupère l'index de la colonne créée
     const colIndex = await page.evaluate((col) => {
       const ths = Array.from(document.querySelectorAll('th .th-name'));
       return ths.findIndex((el) => el.textContent.includes(col));
     }, TEST_COL);
     expect(colIndex).toBeGreaterThan(0);
 
-    // Double-click sur la cellule (row 0, col=colIndex)
-    const cell = page.locator(`td.cell[data-row="0"][data-col="${colIndex}"]`).first();
+    // Double-click sur la cellule pour entrer en édition
+    const cellSel = `td.cell[data-row="0"][data-col="${colIndex}"]`;
+    const cell = page.locator(cellSel).first();
     await cell.scrollIntoViewIfNeeded();
     await cell.dblclick();
-    // Un input doit apparaître (édition inline)
     const input = page.locator('td.cell input').first();
     await expect(input).toBeVisible({ timeout: 5_000 });
     await input.fill('=SOMME(palettes_entree)');
-    await input.press('Enter');
+    // Enter via clavier global (pas via la locator qui peut se détacher au re-render)
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(1200);
 
-    // Attendre que la cellule ne soit ni en édition ni "#NAME?"
-    await page.waitForTimeout(800);
-    const txt = (await cell.textContent()).trim();
-    expect(txt, `cell text was "${txt}"`).not.toMatch(/#NAME\?|#ERREUR!|#NOM\?/i);
-    // Doit contenir un chiffre (la somme HF)
-    expect(txt).toMatch(/\d/);
+    // Re-locate la cellule après renderTable
+    const txt = (await page.locator(cellSel).first().textContent()).trim();
+    expect(txt, `cell text was "${txt}"`).not.toMatch(/#NAME\?|#ERREUR!|#NOM\?|#NOMBRE!/i);
+    expect(txt, `cell text was "${txt}"`).toMatch(/\d/);
   });
 
   test('5. autocomplete : =SOMME(B → dropdown .ac-dropdown visible', async ({ page }) => {
     await gotoApp(page);
     await selectTable(page, TEST_TABLE);
-    const cell = page.locator('td.cell[data-row="0"][data-col="1"]').first();
-    await cell.scrollIntoViewIfNeeded();
-    await cell.dblclick();
-    const input = page.locator('td.cell input').first();
-    await expect(input).toBeVisible();
-    // type character by character so autocomplete fires
-    await input.click();
-    await page.keyboard.type('=SOMME(B', { delay: 60 });
-    const dd = page.locator('#acDropdown, .ac-dropdown').first();
+    // Utilise la formula bar (toujours présente) plutôt qu'une cellule
+    const fbar = page.locator('#formulaInput');
+    await fbar.click();
+    await fbar.fill('');
+    await page.keyboard.type('=SOMME(B', { delay: 80 });
+    const dd = page.locator('#acDropdown');
     await expect(dd).toBeVisible({ timeout: 5_000 });
-    const items = await page.locator('.ac-dropdown .ac-item, #acDropdown .ac-item, #acDropdown > div, .ac-dropdown > div').count();
+    const items = await page.locator('#acDropdown .ac-item').count();
     expect(items).toBeGreaterThanOrEqual(1);
     await page.keyboard.press('Escape');
   });
@@ -139,25 +132,32 @@ test.describe('MHP DataSheet — smoke E2E', () => {
   test('6. fill handle : drag vers le bas recopie la valeur sur 3 lignes', async ({ page }) => {
     await gotoApp(page);
     await selectTable(page, TEST_TABLE);
-    // Click cellule source (row 0, col 1 = colonne B, généralement texte)
+    // Click cellule source (row 0, col 1)
     const src = page.locator('td.cell[data-row="0"][data-col="1"]').first();
     await src.scrollIntoViewIfNeeded();
     await src.click();
-    // Le fill handle doit apparaître
     await expect(page.locator('.cell-fill-handle')).toBeVisible({ timeout: 5_000 });
     const srcText = (await src.textContent()).trim();
 
-    // Simule un drag depuis le handle jusqu'à la cellule row=3
     const handle = page.locator('.cell-fill-handle').first();
+    const hb = await handle.boundingBox();
     const dst = page.locator('td.cell[data-row="3"][data-col="1"]').first();
     await dst.scrollIntoViewIfNeeded();
-    const hb = await handle.boundingBox();
     const db = await dst.boundingBox();
+    const r1 = await page.locator('td.cell[data-row="1"][data-col="1"]').first().boundingBox();
+    const r2 = await page.locator('td.cell[data-row="2"][data-col="1"]').first().boundingBox();
+
     await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
     await page.mouse.down();
-    await page.mouse.move(db.x + db.width / 2, db.y + db.height / 2, { steps: 12 });
+    // pause entre chaque mouvement pour laisser onFillMove enregistrer chaque ri
+    await page.mouse.move(r1.x + r1.width / 2, r1.y + r1.height / 2, { steps: 6 });
+    await page.waitForTimeout(100);
+    await page.mouse.move(r2.x + r2.width / 2, r2.y + r2.height / 2, { steps: 6 });
+    await page.waitForTimeout(100);
+    await page.mouse.move(db.x + db.width / 2, db.y + db.height / 2, { steps: 6 });
+    await page.waitForTimeout(150);
     await page.mouse.up();
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(500);
 
     for (let r = 1; r <= 3; r++) {
       const t = (await page.locator(`td.cell[data-row="${r}"][data-col="1"]`).first().textContent()).trim();

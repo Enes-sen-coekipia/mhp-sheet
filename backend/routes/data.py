@@ -37,11 +37,13 @@ def list_tables():
 
 # ─── Création de table ───────────────────────────────────────
 class NewTableColumn(BaseModel):
+    model_config = {"extra": "forbid"}  # rejette {type:...} (le bon champ est col_type)
     name: str = Field(..., min_length=1, max_length=63)
     col_type: str = "TEXT"
 
 
 class NewTable(BaseModel):
+    model_config = {"extra": "forbid"}
     name: str = Field(..., min_length=1, max_length=63)
     columns: list[NewTableColumn] = Field(..., min_length=1, max_length=200)
 
