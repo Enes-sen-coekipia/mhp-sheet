@@ -116,16 +116,12 @@ function rebuildHF() {
       licenseKey: 'gpl-v3',
       language: useFr ? 'frFR' : 'enGB',
     });
-    // Plages nommées : =SOMME(palettes_entree) plutôt que =SOMME(B:B)
-    // ⚠️ HyperFormula plante en récursion sur les full-column refs (B:B) utilisés
-    // comme named expression depuis n'importe quelle cellule. On force une plage FINIE
-    // basée sur le nb de lignes chargées (souvent 500, max 5000 selon la pager).
-    const nRows = Math.max(state.rows.length, 1);
-    state.colNames.forEach((col, ci) => {
-      const letter = colLetter(ci);
-      const range = `=Sheet1!${letter}1:${letter}${nRows}`;
-      try { hf.addNamedExpression(col, range); } catch {}
-    });
+    // ⚠️ Les plages nommées HyperFormula ont 2 problèmes :
+    //   1. Full-column (B:B) cause récursion infinie ("Maximum call stack")
+    //   2. Plage finie (B1:B500) en arithmétique avec '+' donne #NOM? ou #VALUE
+    // → On ne les utilise plus du tout. L'autocomplete propose désormais les
+    //   références par lettre (B1, B:B) même quand l'utilisateur tape le nom
+    //   de colonne — c'est plus fiable et compatible avec toutes les formules.
     hfReady = true;
   } catch (e) {
     console.error('HyperFormula init failed', e);
@@ -214,42 +210,36 @@ function buildSuggestions(token) {
     .map((f) => ({ kind: 'fn', ...f }));
 
   // Colonnes : match par LETTRE (B, AA…) OU par NOM (nb_…)
+  // Insertion TOUJOURS par lettre+ligne (B1) car HyperFormula ne gère pas
+  // les plages nommées de manière fiable (#NOM? ou récursion).
   const colMatches = [];
   state.colNames.forEach((col, ci) => {
     const letter = colLetter(ci);
     const matchedByLetter = letter.startsWith(upper);
     const matchedByName = col.toLowerCase().startsWith(lower);
     if (!matchedByLetter && !matchedByName) return;
-    // Insertion : si l'utilisateur tapait des lettres (B, AA…) → insère 'B1' (ref de cellule)
-    //             sinon (a tapé le début du nom) → insère le nom (named range)
-    const insertText = matchedByLetter && !matchedByName ? `${letter}1` : col;
+    // Ref cellule (B1)
     colMatches.push({
       kind: 'col',
       name: col,
       letter: letter,
       type_pg: state.colTypes[col] || 'text',
-      matchedBy: matchedByLetter && !matchedByName ? 'letter' : 'name',
-      insertText: insertText,
+      matchedBy: matchedByLetter ? 'letter' : 'name',
+      insertText: `${letter}1`,
+      labelPrefix: `${letter}1`,
+    });
+    // Ref colonne entière (B:B) — utile pour SOMME, MOYENNE, etc.
+    colMatches.push({
+      kind: 'col',
+      name: col,
+      letter: letter,
+      type_pg: state.colTypes[col] || 'text',
+      matchedBy: 'range',
+      insertText: `${letter}:${letter}`,
+      labelPrefix: `${letter}:${letter}`,
+      rangeNote: 'colonne entière',
     });
   });
-
-  // Cas spécial : si l'utilisateur tape juste 1 lettre (B, AA), proposer aussi B:B (colonne entière)
-  if (/^[A-Z]+$/i.test(t)) {
-    state.colNames.forEach((col, ci) => {
-      const letter = colLetter(ci);
-      if (letter.startsWith(upper)) {
-        colMatches.push({
-          kind: 'col',
-          name: col,
-          letter: letter,
-          type_pg: state.colTypes[col] || 'text',
-          matchedBy: 'range',
-          insertText: `${letter}:${letter}`,
-          rangeNote: 'colonne entière',
-        });
-      }
-    });
-  }
 
   // Ordre : si lettre majuscule en 1er → fonctions+lettre prioritaire, sinon colonnes par nom
   const isUpperFirst = t[0] === t[0].toUpperCase() && /[A-Z]/.test(t[0]);
@@ -321,14 +311,13 @@ function acRender() {
           <span class="ac-desc">${escapeHTML(it.short)}</span>
         </div>`;
     }
-    // Colonne : affiche "B · nb_transports_crees"
+    // Colonne : affiche "B1 · nb_transports_crees" ou "B:B · colonne entière"
     const isRange = it.matchedBy === 'range';
-    const labelLetter = isRange ? `${it.letter}:${it.letter}` : it.letter;
-    const desc = isRange ? `colonne ${it.letter} entière (${it.name})` : `${it.name}`;
+    const desc = isRange ? `colonne entière de ${it.name}` : `cellule ligne 1 de ${it.name}`;
     return `
       <div class="ac-item ${active}" data-idx="${i}">
         <span class="ac-icon ac-col">${isRange ? '▥' : '▦'}</span>
-        <span class="ac-name"><strong>${escapeHTML(labelLetter)}</strong> · ${escapeHTML(it.name)}</span>
+        <span class="ac-name"><strong>${escapeHTML(it.labelPrefix || it.letter)}</strong> · ${escapeHTML(it.name)}</span>
         <span class="ac-sig">${escapeHTML(it.type_pg)}</span>
         <span class="ac-desc">${escapeHTML(desc)}</span>
       </div>`;
