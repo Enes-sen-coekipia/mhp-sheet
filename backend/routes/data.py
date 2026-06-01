@@ -89,7 +89,10 @@ def get_table(
     effective_limit = min(limit or settings.default_page_size, settings.max_page_size)
 
     with get_cursor(dict_cursor=True) as (cur, _):
-        cur.execute(f'SELECT * FROM "{table}" LIMIT %s OFFSET %s', (effective_limit, offset))
+        # ORDER BY ctid pour garantir un ordre stable entre 2 refresh
+        # (sans ordre explicite, PG peut retourner les lignes dans n'importe quel ordre,
+        #  ce qui casse la pagination + l'expérience utilisateur)
+        cur.execute(f'SELECT * FROM "{table}" ORDER BY ctid LIMIT %s OFFSET %s', (effective_limit, offset))
         rows = [dict(r) for r in cur.fetchall()]
 
         cur.execute(f'SELECT COUNT(*) AS c FROM "{table}"')

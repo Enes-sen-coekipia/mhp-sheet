@@ -117,9 +117,14 @@ function rebuildHF() {
       language: useFr ? 'frFR' : 'enGB',
     });
     // Plages nommées : =SOMME(palettes_entree) plutôt que =SOMME(B:B)
+    // ⚠️ HyperFormula plante en récursion sur les full-column refs (B:B) utilisés
+    // comme named expression depuis n'importe quelle cellule. On force une plage FINIE
+    // basée sur le nb de lignes chargées (souvent 500, max 5000 selon la pager).
+    const nRows = Math.max(state.rows.length, 1);
     state.colNames.forEach((col, ci) => {
       const letter = colLetter(ci);
-      try { hf.addNamedExpression(col, `=Sheet1!${letter}:${letter}`); } catch {}
+      const range = `=Sheet1!${letter}1:${letter}${nRows}`;
+      try { hf.addNamedExpression(col, range); } catch {}
     });
     hfReady = true;
   } catch (e) {
@@ -145,8 +150,14 @@ function getDisplayValue(ri, ci) {
   const s = String(raw);
   if (isFormulaText(s) && hfReady) {
     let v;
-    try { v = hf.getCellValue({ sheet: 0, col: ci, row: ri }); }
-    catch { return { text: '#ERR', isFormula: true, isError: true }; }
+    try {
+      v = hf.getCellValue({ sheet: 0, col: ci, row: ri });
+    } catch (e) {
+      // Protection : si HF crash (récursion, RangeError…), on continue à render
+      // les autres cellules au lieu de vider tbody
+      console.warn('HF crash cell', ri, ci, e && e.message);
+      return { text: '#STACK', isFormula: true, isError: true };
+    }
     return formatHFValue(v, true);
   }
   return { text: s, isFormula: false, isError: false };
