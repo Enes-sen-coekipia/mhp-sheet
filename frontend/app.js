@@ -135,6 +135,11 @@ function updateHFCell(ri, ci, raw) {
     return hf.setCellContents({ sheet: 0, col: ci, row: ri }, [[toHFValue(raw)]]);
   } catch (e) {
     console.warn('HF update failed', e);
+    // RangeError = stack overflow → HF dans un état corrompu, on désactive
+    if (e && (e.name === 'RangeError' || /call stack/i.test(e.message || ''))) {
+      hfReady = false;
+      toast('Moteur formules désactivé (récursion détectée). Rechargez la page pour réactiver.', 'red');
+    }
     return [];
   }
 }
@@ -767,6 +772,9 @@ function renderTable() {
   const displayIndices = view.map((v) => v.origI);
   renderActiveFilters();
 
+  // Sentinelle anti-recursion HyperFormula : si on a déjà détecté un crash récent,
+  // on désactive HF pour cette session et on affiche les formules en texte brut.
+  // L'utilisateur peut quand même éditer/sauvegarder ses formules.
   displayRows.forEach((row, di) => {
     const tr = document.createElement('tr');
     const idxTd = document.createElement('td');
@@ -778,7 +786,8 @@ function renderTable() {
     tr.appendChild(idxTd);
 
     const realRi = displayIndices[di];
-    state.colNames.forEach((col, ci) => {
+    try {
+      state.colNames.forEach((col, ci) => {
       const td = document.createElement('td');
       td.className = 'cell';
       const raw = row[col];
@@ -813,7 +822,19 @@ function renderTable() {
       td.onclick = () => selectCell(realRi, ci, td);
       td.ondblclick = () => startEdit(realRi, ci, td);
       tr.appendChild(td);
-    });
+      });
+    } catch (e) {
+      // Crash potentiel d'HyperFormula (RangeError "Maximum call stack") :
+      // on désactive HF pour cette session et on re-render sans calculer les formules.
+      console.error('renderTable inner loop crashed:', e);
+      if (hfReady) {
+        hfReady = false;
+        toast('Moteur formules désactivé suite à un crash. Rechargez la page si besoin.', 'red');
+        // Re-render synchronisé : les formules s'afficheront en texte brut
+        setTimeout(() => renderTable(), 0);
+        return;
+      }
+    }
 
     tbody.appendChild(tr);
   });
@@ -2327,7 +2348,7 @@ function onGlobalKey(e) {
   else if (e.key === 'Enter' || e.key === 'F2') {
     if (td) startEdit(ri, ci, td);
     return;
-  } else if (e.key === 'Delete') {
+  } else if (e.key === 'Delete' || e.key === 'Backspace') {
     if (state.rows[ri]) {
       const col = state.colNames[ci];
       if (state.formulas[col]) return;
@@ -2340,6 +2361,7 @@ function onGlobalKey(e) {
       markModified();
       renderTable();
     }
+    e.preventDefault();   // ← évite que Backspace fasse "page précédente" dans certains navigateurs
     return;
   } else return;
 
