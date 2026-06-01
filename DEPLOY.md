@@ -12,6 +12,13 @@ Nginx (existant, C:\nginx\)  →  C:\MHP\mhp-datasheet\frontend  (HTML/CSS/JS st
 uvicorn (service NSSM)  127.0.0.1:8001  →  PostgreSQL 18 local
 ```
 
+> **Ports utilisés** (ne pas confondre avec le dev Docker qui utilise 3000/8000) :
+> - **8081** : Nginx, port public exposé aux utilisateurs MHP (LAN)
+> - **8001** : uvicorn FastAPI, écoute **en interne uniquement** (127.0.0.1), pas exposé au LAN
+> - **5432** : PostgreSQL local
+> 
+> En dev (Docker local), c'est 3000 et 8000 — mais en prod sur le serveur Windows MHP, c'est **8081/8001**.
+
 ## Pré-requis sur le serveur (une seule fois)
 
 | Outil | Vérification | Si absent |
@@ -223,18 +230,54 @@ Pas de conflit avec `MHP_app` (8080), `MySQL` (3306) ou `Backend MHP_app` (8000)
 
 Pour autoriser les scripts Apps Script à pousser des données / déclencher des scripts :
 
+### 1. Générer un token (sur ton PC ou le serveur)
+
 ```powershell
-# Génère un token aléatoire
 $token = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 40 | % {[char]$_})
-echo "INGEST_API_TOKEN=$token"
+$token   # Affiche le token, ex: kQ8mF3xR2pL9wN7vB4cT6yH1aZ5sD0eU2bMn7xQzP9rW
 ```
 
-→ Coller la ligne dans `C:\MHP\mhp-datasheet\.env`, puis :
+### 2. Le mettre dans `.env`
+
+Ouvrir `C:\MHP\mhp-datasheet\.env` avec notepad, ajouter (ou modifier si déjà présent) **EXACTEMENT cette ligne** :
+```
+INGEST_API_TOKEN=kQ8mF3xR2pL9wN7vB4cT6yH1aZ5sD0eU2bMn7xQzP9rW
+```
+⚠️ Pas d'espaces autour du `=`. Pas de guillemets. Une seule ligne. Sauver le fichier.
+
+### 3. Restart le backend
+
 ```powershell
 C:\nssm\nssm.exe restart MHP-Datasheet-Backend
 ```
 
-→ Coller le **même token** dans `apps_script_templates/_helper.gs` côté Google (variable `MHP_TOKEN`).
+### 4. Vérifier que le serveur l'a bien pris
+
+```powershell
+# Sans token : doit échouer
+Invoke-RestMethod -Uri "http://localhost:8081/api/table/stock_it/rows" -Method Post -ContentType "application/json" -Body '{"rows":[],"mode":"append"}' -ErrorAction SilentlyContinue
+# → Doit renvoyer 401 "Token d'ingestion invalide ou manquant"
+
+# Avec le bon token : doit marcher (sauf que "rows":[] = 400 normal)
+$headers = @{ 'X-API-Token' = 'kQ8mF3xR2pL9wN7vB4cT6yH1aZ5sD0eU2bMn7xQzP9rW' }
+Invoke-RestMethod -Uri "http://localhost:8081/api/table/stock_it/rows" -Method Post -Headers $headers -ContentType "application/json" -Body '{"rows":[],"mode":"append"}'
+# → 400 "Les lignes sont vides" (= passe l'auth)
+```
+
+### 5. Mettre le **même token** dans Apps Script
+
+Dans le projet Apps Script, fichier `_helper.gs`, ligne :
+```javascript
+const MHP_TOKEN = 'kQ8mF3xR2pL9wN7vB4cT6yH1aZ5sD0eU2bMn7xQzP9rW';
+```
+→ Strictement identique à celui dans `.env`. Si tu perds le token, regénère et change des 2 côtés.
+
+### Sécurité du token
+
+- ❌ Ne pas commiter dans git (`.env` est dans `.gitignore` ✓)
+- ❌ Ne pas le partager dans un mail standard
+- ✅ Si compromis : régénérer + restart backend + mettre à jour Apps Script
+- ✅ Si plusieurs clients utilisent l'app : un token par client serait mieux (pas implémenté actuellement)
 
 ## Templates Apps Script — migration des scripts existants
 
@@ -352,6 +395,73 @@ mhp.log(f"✅ {n} lignes importées dans stock_it")
 ```
 
 À programmer en cron type `0 7 * * *` (tous les jours à 7h) dans la modale Scripts.
+
+## Exposition à internet — pour Apps Script (Gmail/Drive/APIs externes)
+
+Apps Script tourne **sur les serveurs Google** et doit pouvoir POSTer vers notre app. Si le serveur Windows MHP n'est joignable qu'en LAN privé (192.168.x.x), Google ne peut pas l'atteindre. Voici les options.
+
+### Option A — Port forwarding sur la box du client (0 compte, 0 service externe)
+
+Le plus pur. Demander au DSI :
+
+1. **Trouver l'IP publique** : depuis n'importe quel PC du LAN MHP, aller sur https://whatismyip.com → noter (ex : `82.123.45.67`)
+2. **Ouvrir le port 8081** sur la box : NAT/Redirection → port externe 8081 TCP → IP locale `192.168.1.7` port 8081
+3. **Pare-feu Windows** sur le serveur :
+   ```powershell
+   New-NetFirewallRule -DisplayName "MHP DataSheet 8081" -Direction Inbound -LocalPort 8081 -Protocol TCP -Action Allow
+   ```
+4. **Tester depuis l'extérieur** (téléphone en 4G, pas wifi MHP) : `http://82.123.45.67:8081/api/health`
+5. **Dans `_helper.gs` Apps Script** : `const MHP_API = 'http://82.123.45.67:8081/api';`
+
+⚠️ **Si l'IP publique du client change** : Apps Script tombera en panne. Solution : demander une IP fixe à leur FAI (souvent dispo en pro), ou utiliser DDNS, ou passer en Option B.
+
+### Option B — Cloudflare Tunnel (URL stable HTTPS, gratuit)
+
+Pas besoin de toucher au routeur. Le serveur sort vers Cloudflare, Cloudflare expose une URL publique.
+
+**Pré-requis** : un compte Cloudflare gratuit (créé par toi le dev, pas par le client) et idéalement un nom de domaine.
+
+```powershell
+# Sur le serveur Windows MHP
+Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "C:\cloudflared.exe"
+
+# Auth avec ton compte Cloudflare (s'ouvre dans le navigateur)
+C:\cloudflared.exe tunnel login
+
+# Crée le tunnel
+C:\cloudflared.exe tunnel create mhp-datasheet
+
+# Si tu as un domaine ajouté à Cloudflare :
+C:\cloudflared.exe tunnel route dns mhp-datasheet mhp-datasheet.tondomaine.fr
+
+# Config du tunnel : créer C:\Users\<toi>\.cloudflared\config.yml
+# tunnel: mhp-datasheet
+# credentials-file: C:\Users\<toi>\.cloudflared\<tunnel-id>.json
+# ingress:
+#   - hostname: mhp-datasheet.tondomaine.fr
+#     service: http://localhost:8081
+#   - service: http_status:404
+
+# Installer comme service Windows (démarre auto)
+C:\cloudflared.exe service install
+
+# Vérifier
+Get-Service cloudflared
+```
+
+→ **Dans `_helper.gs` Apps Script** : `const MHP_API = 'https://mhp-datasheet.tondomaine.fr/api';`
+
+**Avantages** :
+- HTTPS automatique (certificat Cloudflare)
+- URL stable même si l'IP MHP change
+- Pas besoin d'ouvrir de port sur leur box
+- Gratuit illimité
+
+**Pas besoin de Cloudflare Tunnel ?** L'option A (port forwarding) est plus simple si MHP a une IP fixe.
+
+### Option C — Polling inversé (zéro exposition)
+
+Notre app appelle **Apps Script** (qui est déjà public chez Google), pas l'inverse. Faisable mais demande une re-architecture (cf. discussion conversation). À envisager seulement si A et B sont impossibles.
 
 ## Restriction LAN (recommandé)
 

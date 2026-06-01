@@ -978,23 +978,40 @@ function onFormulaKey(e) {
 // ============================================================
 //  Save (batch)
 // ============================================================
+let _saveInProgress = false;
 async function saveAllChanges() {
   if (state.pending.size === 0) return;
-  const changes = Array.from(state.pending.values());
+  if (_saveInProgress) {
+    toast('Sauvegarde déjà en cours…', 'orange');
+    return;
+  }
+  _saveInProgress = true;
+
+  // Snapshot des clés à envoyer — protège contre data loss si l'utilisateur
+  // modifie d'autres cellules pendant le round-trip réseau (200ms-2s).
+  // Les nouvelles modifs restent dans state.pending et seront sauvegardées au prochain Ctrl+S.
+  const keysToSave = Array.from(state.pending.keys());
+  const changes = keysToSave.map((k) => state.pending.get(k));
+
   try {
     const res = await api('/cells/batch', {
       method: 'PUT',
       body: JSON.stringify({ table: state.table, primary_col: state.primaryCol, changes }),
     });
-    state.pending.clear();
+    // Retire SEULEMENT les clés envoyées (préserve les modifs faites pendant l'await)
+    keysToSave.forEach((k) => state.pending.delete(k));
     state.undoStack = [];
     updatePendingCount();
-    $('saveBtn').classList.add('hidden');
-    $('modifiedInfo').style.display = 'none';
-    toast(`✓ ${res.updated} cellule(s) sauvegardée(s) sur ${res.submitted}`, 'green');
+    if (state.pending.size === 0) {
+      $('saveBtn').classList.add('hidden');
+      $('modifiedInfo').style.display = 'none';
+    }
+    toast(`✓ ${res.updated} cellule(s) sauvegardée(s) sur ${res.submitted}${state.pending.size ? ` (${state.pending.size} en attente)` : ''}`, 'green');
     await loadTable(state.table, { resetOffset: false });
   } catch (e) {
-    toast('Erreur sauvegarde : ' + e.message, 'red');
+    toast('Erreur sauvegarde : ' + e.message + ' — modifs gardées en attente', 'red');
+  } finally {
+    _saveInProgress = false;
   }
 }
 
@@ -1123,11 +1140,17 @@ function openColumnMenu(ci, anchorEl) {
   const sortDir = state.sort && state.sort.ci === ci ? state.sort.dir : null;
   const filterVal = state.filters[ci] || '';
   const hasSql = !!state.formulas[col];
+  // Avertissement si pagination : tri/filtre limité à la page courante
+  const isPaginated = state.total > state.rows.length;
+  const paginationWarning = isPaginated
+    ? `<div class="cm-section"><div style="padding:4px 10px;font-size:10.5px;color:var(--orange);line-height:1.4;">⚠️ Le tri/filtre porte sur les <strong>${state.rows.length}</strong> lignes affichées sur <strong>${state.total.toLocaleString('fr-FR')}</strong>. Augmente la Limit dans la pager pour trier toute la table.</div></div>`
+    : '';
   const menu = $('colMenu');
   menu.innerHTML = `
     <div class="cm-section">
       <div class="cm-label">${escapeHTML(col)} · ${escapeHTML(state.colTypes[col] || 'text')}</div>
     </div>
+    ${paginationWarning}
     <div class="cm-section">
       <button class="cm-item ${sortDir === 'asc' ? 'active' : ''}" data-act="sort-asc">↑ Trier croissant</button>
       <button class="cm-item ${sortDir === 'desc' ? 'active' : ''}" data-act="sort-desc">↓ Trier décroissant</button>
