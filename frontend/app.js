@@ -2036,6 +2036,18 @@ function onFillEnd() {
   applyFillRange(srcRi, srcCi, currentRi);
 }
 
+// Décale les références relatives (B1, AA42…) d'une formule par un offset
+// de lignes/colonnes. Préserve les refs absolues ($B$1, $B1, B$1).
+// Utilisé en fallback si HyperFormula copy/paste ne fonctionne pas.
+function shiftFormulaRefs(formula, rowOffset, colOffset) {
+  if (!formula || rowOffset === 0 && colOffset === 0) return formula;
+  return formula.replace(/(\$?)([A-Z]+)(\$?)(\d+)/g, (m, colAnchor, colLetters, rowAnchor, rowStr) => {
+    let newRow = parseInt(rowStr, 10);
+    if (!rowAnchor) newRow = Math.max(1, newRow + rowOffset);
+    return colAnchor + colLetters + rowAnchor + newRow;
+  });
+}
+
 function applyFillRange(srcRi, srcCi, endRi) {
   const col = state.colNames[srcCi];
   if (state.formulas[col]) {
@@ -2053,21 +2065,38 @@ function applyFillRange(srcRi, srcCi, endRi) {
   const end = Math.max(srcRi, endRi);
   let count = 0;
 
-  // Si formule : on demande à HyperFormula d'ajuster les références (relatives)
+  // Si formule : on tente HyperFormula copy/paste (syntaxe HF 3.x = {start, end})
+  let canHfPaste = false;
   if (isFormula && hfReady) {
-    try { hf.copy({ sheet: 0, col: srcCi, row: srcRi, width: 1, height: 1 }); } catch {}
+    try {
+      hf.copy({
+        start: { sheet: 0, col: srcCi, row: srcRi },
+        end:   { sheet: 0, col: srcCi, row: srcRi },
+      });
+      canHfPaste = true;
+    } catch (e) {
+      console.warn('hf.copy a échoué, fallback shift manuel :', e.message);
+    }
   }
 
   for (let r = start; r <= end; r++) {
     if (r === srcRi) continue;
     let newValue;
-    if (isFormula && hfReady) {
-      try {
-        hf.paste({ sheet: 0, col: srcCi, row: r });
-        const adjusted = hf.getCellFormula({ sheet: 0, col: srcCi, row: r });
-        newValue = adjusted || String(srcValue);
-      } catch (e) {
-        newValue = String(srcValue);
+    if (isFormula) {
+      // Priorité 1 : HyperFormula paste (ajuste les refs automatiquement)
+      if (canHfPaste) {
+        try {
+          hf.paste({ sheet: 0, col: srcCi, row: r });
+          const adjusted = hf.getCellFormula({ sheet: 0, col: srcCi, row: r });
+          newValue = adjusted || shiftFormulaRefs(String(srcValue), r - srcRi, 0);
+        } catch (e) {
+          console.warn('hf.paste row', r, ':', e.message);
+          newValue = shiftFormulaRefs(String(srcValue), r - srcRi, 0);
+          updateHFCell(r, srcCi, newValue);
+        }
+      } else {
+        // Priorité 2 : fallback regex
+        newValue = shiftFormulaRefs(String(srcValue), r - srcRi, 0);
         updateHFCell(r, srcCi, newValue);
       }
     } else {
